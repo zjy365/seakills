@@ -1,14 +1,45 @@
-# Sealos Deploy v1.0.3
+# Sealos Deploy v1.0.4
 
 One command to deploy any GitHub project to Sealos Cloud.
 
-Works with Claude Code, Gemini CLI, Codex — any AI coding assistant with file and terminal access.
+Works with **Claude Code**, **Gemini CLI**, **Codex** — any AI coding assistant with file and terminal access.
 
 ## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zjy365/sealos-deploy/main/install.sh | bash
 ```
+
+The installer automatically detects your installed AI tools and sets up skills for each one:
+
+```
+Installing Sealos Deploy v1.0.4...
+
+Downloading...
+
+Installing skills...
+  ✓ sealos-deploy
+  ✓ dockerfile-skill
+  ✓ cloud-native-readiness
+  ✓ docker-to-sealos
+
+Linking to detected agents...
+  ✓ Claude Code → ~/.claude/skills (symlinked)
+  ✓ Gemini CLI → ~/.gemini/skills (symlinked)
+  ✓ Codex → ~/.codex/skills (symlinked)
+
+Sealos Deploy v1.0.4 ready.
+```
+
+**Supported tools:**
+
+| Tool | Global Skills Dir | Detection |
+|------|------------------|-----------|
+| Claude Code | `~/.claude/skills/` | `~/.claude` exists |
+| Gemini CLI | `~/.gemini/skills/` | `~/.gemini` exists |
+| Codex | `~/.codex/skills/` | `~/.codex` or `$CODEX_HOME` exists |
+
+Skills are installed once to `~/.agents/skills/` (canonical), then symlinked to each tool's directory. No duplication.
 
 ## Use
 
@@ -24,6 +55,7 @@ That's it. The skill handles everything:
 [assess]    Go + net/http → suitable for deployment
 [detect]    Found ghcr.io/zxh326/kite:v0.4.0 (amd64) → skip build
 [template]  Generated template/kite/index.yaml
+[deploy]    ✓ Deployed to Sealos Cloud
 ```
 
 ## What Happens
@@ -49,6 +81,9 @@ Build & Push to Docker Hub                       │
 Generate Sealos Template
   │
   ▼
+Deploy to Sealos Cloud
+  │
+  ▼
 Done ✓
 ```
 
@@ -58,7 +93,7 @@ On first use, the skill checks your environment and guides you through setup:
 
 1. **Docker** — needed to build images locally
 2. **Docker Hub** — where built images are pushed (`docker login`)
-3. **Sealos Cloud** — your deployment target (just provide a token)
+3. **Sealos Cloud** — OAuth2 device grant flow (opens browser, no token copy-paste)
 
 All setup is interactive. The skill asks for what it needs, when it needs it.
 
@@ -66,16 +101,17 @@ All setup is interactive. The skill asks for what it needs, when it needs it.
 
 ```
 sealos-deploy/
-├── install.sh                          # One-line installer
+├── install.sh                          # Multi-agent installer
 ├── README.md
 └── skills/
     ├── sealos-deploy/                  # Main skill — /sealos-deploy
     │   ├── SKILL.md                    # Entry point & phase overview
+    │   ├── config.json                 # Skill constants (client_id, region)
     │   ├── modules/
     │   │   ├── preflight.md            # Docker + auth checks
-    │   │   └── pipeline.md             # Phase 1–5 pipeline
+    │   │   └── pipeline.md             # Phase 1–6 pipeline
     │   └── scripts/
-    │       └── sealos-auth.mjs         # Sealos Cloud auth helper
+    │       └── sealos-auth.mjs         # Sealos Cloud auth (OAuth2 device grant)
     │
     ├── dockerfile-skill/               # Internal — Dockerfile generation
     ├── cloud-native-readiness/         # Internal — readiness assessment

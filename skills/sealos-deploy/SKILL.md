@@ -1,6 +1,6 @@
 ---
 name: sealos-deploy
-version: "1.0.3"
+version: "1.0.4"
 description: Deploy any GitHub project to Sealos Cloud in one command. Assesses readiness, generates Dockerfile, builds image, creates Sealos template, and deploys — fully automated.
 triggers:
   - /sealos-deploy
@@ -108,9 +108,11 @@ All scripts output JSON. Run via Bash and parse the result.
 
 This skill references knowledge files from co-installed internal skills. These are **not** user-facing — they are loaded on-demand during specific phases.
 
+`<SKILL_DIR>` refers to the directory containing this `SKILL.md`. Sibling skills are at `<SKILL_DIR>/../`:
+
 ```
-~/.claude/skills/
-├── sealos-deploy/           ← this skill (user entry point)
+<SKILL_DIR>/../
+├── sealos-deploy/           ← this skill (user entry point) = <SKILL_DIR>
 ├── dockerfile-skill/        ← Phase 3: Dockerfile generation knowledge
 ├── cloud-native-readiness/  ← Phase 1: assessment criteria
 └── docker-to-sealos/       ← Phase 5: Sealos template rules
@@ -118,9 +120,9 @@ This skill references knowledge files from co-installed internal skills. These a
 
 Paths used in pipeline.md follow the pattern:
 ```
-~/.claude/skills/dockerfile-skill/knowledge/error-patterns.md
-~/.claude/skills/dockerfile-skill/templates/<lang>.dockerfile
-~/.claude/skills/docker-to-sealos/references/sealos-specs.md
+<SKILL_DIR>/../dockerfile-skill/knowledge/error-patterns.md
+<SKILL_DIR>/../dockerfile-skill/templates/<lang>.dockerfile
+<SKILL_DIR>/../docker-to-sealos/references/sealos-specs.md
 ```
 
 ## Phase Overview

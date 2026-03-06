@@ -2,7 +2,7 @@
 
 After preflight passes, execute Phase 1–5 in order.
 
-`SKILL_DIR` refers to the directory containing this skill's SKILL.md (e.g., `~/.claude/skills/sealos-deploy`).
+`SKILL_DIR` refers to the directory containing this skill's SKILL.md. Sibling skills are at `<SKILL_DIR>/../`.
 
 Use `ENV` from preflight to choose between script mode (Node.js available) and fallback mode (AI-native).
 
@@ -32,7 +32,7 @@ Perform the scoring yourself by reading project files and applying these rules:
 6. Check Docker: `Dockerfile` or `docker-compose.yml` exists?
 
 Score 6 dimensions (0-2 each, max 12). For detailed criteria, read:
-`~/.claude/skills/cloud-native-readiness/knowledge/scoring-criteria.md`
+`<SKILL_DIR>/../cloud-native-readiness/knowledge/scoring-criteria.md`
 
 **Decision:**
 - `score < 4` → STOP. Tell user: "This project scored {N}/12 ({verdict}). Not suitable for containerized deployment because: {dimension_details for 0-score dimensions}."
@@ -47,8 +47,8 @@ Based on the score result and your own analysis of the project, assess:
 3. Determine: ports, required env vars, database dependencies, special concerns
 
 If the score is borderline (4-6), also read:
-- `~/.claude/skills/cloud-native-readiness/knowledge/scoring-criteria.md` — detailed rubrics
-- `~/.claude/skills/cloud-native-readiness/knowledge/anti-patterns.md` — disqualifying patterns
+- `<SKILL_DIR>/../cloud-native-readiness/knowledge/scoring-criteria.md` — detailed rubrics
+- `<SKILL_DIR>/../cloud-native-readiness/knowledge/anti-patterns.md` — disqualifying patterns
 
 **STOP conditions:**
 - Desktop/GUI application (Electron without server, Qt, GTK)
@@ -112,12 +112,12 @@ If no Dockerfile exists, generate one.
 
 **Load the appropriate template from the internal dockerfile-skill:**
 ```
-~/.claude/skills/dockerfile-skill/templates/golang.dockerfile
-~/.claude/skills/dockerfile-skill/templates/nodejs-express.dockerfile
-~/.claude/skills/dockerfile-skill/templates/nodejs-nextjs.dockerfile
-~/.claude/skills/dockerfile-skill/templates/python-fastapi.dockerfile
-~/.claude/skills/dockerfile-skill/templates/python-django.dockerfile
-~/.claude/skills/dockerfile-skill/templates/java-springboot.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/golang.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/nodejs-express.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/nodejs-nextjs.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/python-fastapi.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/python-django.dockerfile
+<SKILL_DIR>/../dockerfile-skill/templates/java-springboot.dockerfile
 ```
 
 Read the template matching the detected language/framework, then adapt it:
@@ -128,8 +128,8 @@ Read the template matching the detected language/framework, then adapt it:
 
 **For detailed analysis guidance, read:**
 ```
-~/.claude/skills/dockerfile-skill/modules/analyze.md    — 17-step analysis process
-~/.claude/skills/dockerfile-skill/modules/generate.md   — generation rules and best practices
+<SKILL_DIR>/../dockerfile-skill/modules/analyze.md    — 17-step analysis process
+<SKILL_DIR>/../dockerfile-skill/modules/generate.md   — generation rules and best practices
 ```
 
 **Key Dockerfile principles:**
@@ -193,13 +193,13 @@ If build fails:
 1. Read the error output
 2. Load error patterns from internal skill:
    ```
-   ~/.claude/skills/dockerfile-skill/knowledge/error-patterns.md
+   <SKILL_DIR>/../dockerfile-skill/knowledge/error-patterns.md
    ```
 3. Match the error → apply fix to Dockerfile → retry
 4. Also consult if needed:
    ```
-   ~/.claude/skills/dockerfile-skill/knowledge/system-deps.md
-   ~/.claude/skills/dockerfile-skill/knowledge/best-practices.md
+   <SKILL_DIR>/../dockerfile-skill/knowledge/system-deps.md
+   <SKILL_DIR>/../dockerfile-skill/knowledge/best-practices.md
    ```
 5. Max 3 retry attempts
 6. If still failing → inform user with the specific error and suggest manual review
@@ -216,14 +216,14 @@ On success, record `IMAGE_REF` from the build output.
 
 Read the internal skill's specifications:
 ```
-~/.claude/skills/docker-to-sealos/SKILL.md                       — 7-step workflow + MUST rules
-~/.claude/skills/docker-to-sealos/references/sealos-specs.md     — Sealos ordering, labels, conventions
-~/.claude/skills/docker-to-sealos/references/conversion-mappings.md — field-level Docker→Sealos mappings
+<SKILL_DIR>/../docker-to-sealos/SKILL.md                       — 7-step workflow + MUST rules
+<SKILL_DIR>/../docker-to-sealos/references/sealos-specs.md     — Sealos ordering, labels, conventions
+<SKILL_DIR>/../docker-to-sealos/references/conversion-mappings.md — field-level Docker→Sealos mappings
 ```
 
 If the project uses databases, also read:
 ```
-~/.claude/skills/docker-to-sealos/references/database-templates.md
+<SKILL_DIR>/../docker-to-sealos/references/database-templates.md
 ```
 
 ### 5.2 Generate Template
@@ -244,7 +244,7 @@ Using `IMAGE_REF`, detected ports, env vars, and the Sealos rules, generate `tem
 
 Run validation if Python is available:
 ```bash
-python "~/.claude/skills/docker-to-sealos/scripts/quality_gate.py" 2>/dev/null
+python "<SKILL_DIR>/../docker-to-sealos/scripts/quality_gate.py" 2>/dev/null
 ```
 
 If Python is not available, validate manually by checking the MUST rules above against the generated YAML.
