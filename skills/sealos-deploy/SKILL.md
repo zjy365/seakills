@@ -45,7 +45,7 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Deploy started" > "$LOG_FILE"
 [2026-03-05 14:30:01] === Phase 0: Preflight ===
 [2026-03-05 14:30:01] Docker: ✓ 27.5.1
 [2026-03-05 14:30:01] Node.js: ✓ 22.12.0
-[2026-03-05 14:30:02] Sealos auth: ✓ (region: https://192.168.12.53.nip.io)
+[2026-03-05 14:30:02] Sealos auth: ✓ (region: <REGION from config.json>)
 [2026-03-05 14:30:02] Project: /Users/dev/myapp (github: https://github.com/owner/repo)
 
 [2026-03-05 14:30:03] === Phase 1: Assess ===
@@ -71,7 +71,7 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Deploy started" > "$LOG_FILE"
 [2026-03-05 14:30:32] Output: template/repo/index.yaml
 
 [2026-03-05 14:30:33] === Phase 6: Deploy ===
-[2026-03-05 14:30:33] Deploy URL: https://template.192.168.12.53.nip.io/api/v2alpha/templates
+[2026-03-05 14:30:33] Deploy URL: https://template.<REGION_DOMAIN>/api/v2alpha/templates
 [2026-03-05 14:30:35] Status: 201 — deployed successfully
 [2026-03-05 14:30:35] === DONE ===
 ```

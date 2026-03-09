@@ -155,7 +155,39 @@ This avoids re-reading README in every phase. The AI already has it in context.
 
 Uses RFC 8628 Device Authorization Grant — no token copy-paste needed.
 
-### Check auth status:
+### 3.0 Region Selection
+
+Before auth, let the user choose which Sealos Cloud region to deploy to.
+
+Read the default region from config:
+```bash
+DEFAULT_REGION=$(cat "<SKILL_DIR>/config.json" | grep -o '"default_region":"[^"]*"' | cut -d'"' -f4)
+```
+
+**Always ask the user to confirm or choose a region.** Present known options and allow custom input:
+
+```
+Which Sealos Cloud region do you want to deploy to?
+
+  1. https://staging-usw-1.sealos.io  (US West - Staging)
+  2. https://cloud.sealos.io           (Production)
+  3. Enter a custom region URL
+
+Default: https://staging-usw-1.sealos.io
+```
+
+If the user has an existing `~/.sealos/auth.json`, read the previously used region and offer it as an option:
+```bash
+PREV_REGION=$(cat ~/.sealos/auth.json 2>/dev/null | grep -o '"region":"[^"]*"' | cut -d'"' -f4)
+```
+
+If `PREV_REGION` exists and differs from `DEFAULT_REGION`, include it in the choices.
+
+Record the user's choice as `REGION` for use throughout the rest of this step and Phase 6.
+
+**If the user picks a different region than the existing `~/.sealos/auth.json`**, the existing kubeconfig is invalid — force re-authentication.
+
+### 3.1 Check auth status:
 
 **With Node.js:**
 ```bash
@@ -168,7 +200,7 @@ Returns: `{ "authenticated": true/false, "kubeconfig_path": "..." }`
 test -f ~/.sealos/kubeconfig && echo '{"authenticated":true}' || echo '{"authenticated":false}'
 ```
 
-### If not authenticated — Device Grant Login:
+### 3.2 If not authenticated — Device Grant Login:
 
 **With Node.js (recommended):**
 ```bash
