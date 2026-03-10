@@ -23,7 +23,7 @@ A Claude Code skill that assesses whether a project is ready for cloud-native de
 
 ```bash
 # Clone to skills directory
-git clone https://github.com/zjy365/cloud-native-readiness.git ~/.claude/skills/cloud-native-readiness
+curl -fsSL https://raw.githubusercontent.com/zjy365/seakills/main/install.sh | bash
 ```
 
 ## Usage
@@ -36,7 +36,7 @@ git clone https://github.com/zjy365/cloud-native-readiness.git ~/.claude/skills/
 
 ## Companion Skills
 
-- [dockerfile-skill](https://github.com/zjy365/dockerfile-skill) — Generates production-ready Dockerfiles (invoked automatically when needed)
+- [dockerfile-skill](https://github.com/zjy365/seakills) — Generates production-ready Dockerfiles (invoked automatically when needed)
 
 ## Structure
 

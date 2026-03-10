@@ -1,4 +1,4 @@
-# Sealos Deploy v1.0.4
+# Seakills v1.0.4
 
 One command to deploy any GitHub project to Sealos Cloud.
 
@@ -7,13 +7,13 @@ Works with **Claude Code**, **Gemini CLI**, **Codex** — any AI coding assistan
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zjy365/sealos-deploy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zjy365/seakills/main/install.sh | bash
 ```
 
 The installer automatically detects your installed AI tools and sets up skills for each one:
 
 ```
-Installing Sealos Deploy v1.0.4...
+Installing Seakills v1.0.4...
 
 Downloading...
 
@@ -28,7 +28,7 @@ Linking to detected agents...
   ✓ Gemini CLI → ~/.gemini/skills (symlinked)
   ✓ Codex → ~/.codex/skills (symlinked)
 
-Sealos Deploy v1.0.4 ready.
+Seakills v1.0.4 ready.
 ```
 
 **Supported tools:**
@@ -100,7 +100,7 @@ All setup is interactive. The skill asks for what it needs, when it needs it.
 ## Project Structure
 
 ```
-sealos-deploy/
+seakills/
 ├── install.sh                          # Multi-agent installer
 ├── README.md
 └── skills/

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION="1.0.4"
-REPO="zjy365/sealos-deploy"
+REPO="zjy365/seakills"
 
 # Canonical install location — single source of truth
 CANONICAL_DIR="$HOME/.agents/skills"
@@ -19,16 +19,16 @@ SKILLS=(
 case "${1:-}" in
   --version|-v)
     if [ -f "$VERSION_FILE" ]; then
-      echo "sealos-deploy $(cat "$VERSION_FILE") (installed)"
+      echo "seakills $(cat "$VERSION_FILE") (installed)"
     else
-      echo "sealos-deploy not installed"
+      echo "seakills not installed"
     fi
     echo "installer $VERSION"
     exit 0
     ;;
   --help|-h)
     cat <<EOF
-Sealos Deploy Installer v${VERSION}
+Seakills Installer v${VERSION}
 
 Usage:
   install.sh              Install or update skills
@@ -68,9 +68,9 @@ fi
 # --- Detect install vs update ---
 if [ -f "$VERSION_FILE" ]; then
   OLD_VERSION=$(cat "$VERSION_FILE")
-  echo "Updating Sealos Deploy: ${OLD_VERSION} → ${VERSION}"
+  echo "Updating Seakills: ${OLD_VERSION} → ${VERSION}"
 else
-  echo "Installing Sealos Deploy v${VERSION}..."
+  echo "Installing Seakills v${VERSION}..."
 fi
 echo ""
 
@@ -83,7 +83,7 @@ if command -v git &>/dev/null; then
   git clone --depth 1 "https://github.com/${REPO}.git" "$tmp/repo" 2>/dev/null
 else
   curl -fsSL "https://github.com/${REPO}/archive/main.tar.gz" | tar -xz -C "$tmp"
-  mv "$tmp"/sealos-deploy-main "$tmp/repo"
+  mv "$tmp"/seakills-main "$tmp/repo"
 fi
 echo ""
 
@@ -154,7 +154,7 @@ fi
 
 # --- Done ---
 echo ""
-echo "Sealos Deploy v${VERSION} ready."
+echo "Seakills v${VERSION} ready."
 echo ""
 echo "Installed to: $CANONICAL_DIR (canonical)"
 for entry in "${AGENTS[@]}"; do
