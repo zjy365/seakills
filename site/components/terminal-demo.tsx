@@ -3,81 +3,142 @@
 import { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "motion/react"
 
-const lines = [
+interface Line {
+  prefix: string
+  content: string
+  delay: number
+  highlight?: boolean
+  success?: boolean
+  link?: boolean
+  dimmed?: boolean
+}
+
+const deployLines: Line[] = [
   { prefix: "[preflight]", content: "Checking environment...", delay: 0 },
   { prefix: "[preflight]", content: "\u2713 Docker installed (27.4.1)", delay: 600, highlight: true },
   { prefix: "[preflight]", content: "\u2713 Docker Hub authenticated", delay: 1000, highlight: true },
   { prefix: "[preflight]", content: "\u2713 Sealos Cloud connected", delay: 1400, highlight: true },
   { prefix: "", content: "", delay: 1700 },
-  { prefix: "[assess]", content: "Scanning project...", delay: 1800 },
-  { prefix: "[assess]", content: "Go + net/http \u2192 suitable for deployment", delay: 2400, highlight: true },
-  { prefix: "", content: "", delay: 2600 },
-  { prefix: "[detect]", content: "Checking for existing images...", delay: 2800 },
-  { prefix: "[detect]", content: "Found ghcr.io/zxh326/kite:v0.4.0 (amd64) \u2192 skip build", delay: 3400, highlight: true },
-  { prefix: "", content: "", delay: 3600 },
-  { prefix: "[template]", content: "Generating Sealos template...", delay: 3800 },
-  { prefix: "[template]", content: "Generated template/kite/index.yaml", delay: 4300, highlight: true },
-  { prefix: "", content: "", delay: 4500 },
-  { prefix: "[deploy]", content: "Deployment complete!", delay: 4800, highlight: true, success: true },
-  { prefix: "[deploy]", content: "\u2192 https://kite.cloud.sealos.run", delay: 5200, link: true },
+  { prefix: "[mode]", content: "No existing deployment found \u2192 DEPLOY", delay: 2000, highlight: true },
+  { prefix: "", content: "", delay: 2200 },
+  { prefix: "[assess]", content: "Scanning project...", delay: 2400 },
+  { prefix: "[assess]", content: "Next.js + TypeScript \u2192 ready to deploy", delay: 3000, highlight: true },
+  { prefix: "", content: "", delay: 3200 },
+  { prefix: "[dockerfile]", content: "Generating optimized Dockerfile...", delay: 3400 },
+  { prefix: "[dockerfile]", content: "Multi-stage build with standalone output", delay: 3900, highlight: true },
+  { prefix: "", content: "", delay: 4100 },
+  { prefix: "[build]", content: "Building & pushing myuser/demo-app:latest...", delay: 4300 },
+  { prefix: "[build]", content: "\u2713 Image pushed to Docker Hub", delay: 5200, highlight: true },
+  { prefix: "", content: "", delay: 5400 },
+  { prefix: "[deploy]", content: "Deployment complete!", delay: 5700, highlight: true, success: true },
+  { prefix: "[deploy]", content: "\u2192 https://demo-app.cloud.sealos.run", delay: 6100, link: true },
+]
+
+const updateLines: Line[] = [
+  { prefix: "[preflight]", content: "\u2713 Environment ready", delay: 0, highlight: true },
+  { prefix: "[preflight]", content: "\u2713 kubectl connected to cluster", delay: 400, highlight: true },
+  { prefix: "", content: "", delay: 600 },
+  { prefix: "[mode]", content: "Found running deployment: demo-app \u2192 UPDATE", delay: 900, highlight: true },
+  { prefix: "", content: "", delay: 1100 },
+  { prefix: "[build]", content: "Building & pushing myuser/demo-app:latest...", delay: 1300 },
+  { prefix: "[build]", content: "\u2713 Image pushed to Docker Hub", delay: 2200, highlight: true },
+  { prefix: "", content: "", delay: 2400 },
+  { prefix: "[update]", content: "Rolling update \u2192 kubectl set image...", delay: 2600 },
+  { prefix: "[update]", content: "\u2713 Rollout complete \u2014 all pods healthy", delay: 3400, highlight: true, success: true },
+  { prefix: "[update]", content: "\u2192 https://demo-app.cloud.sealos.run", delay: 3800, link: true },
 ]
 
 export function TerminalDemo() {
+  const [phase, setPhase] = useState<"idle" | "typing-deploy" | "deploy" | "pause" | "typing-update" | "update">("idle")
   const [visibleCount, setVisibleCount] = useState(0)
-  const [hasStarted, setHasStarted] = useState(false)
   const [typingText, setTypingText] = useState("")
-  const [showCommand, setShowCommand] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const command = "/sealos-deploy https://github.com/labring-sigs/kite"
+  const deployCommand = "/sealos-deploy"
+  const updateCommand = "/sealos-deploy"
 
+  // Start on scroll into view
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !hasStarted) {
-          setHasStarted(true)
+        if (entry.isIntersecting && phase === "idle") {
+          setPhase("typing-deploy")
         }
       },
       { threshold: 0.3 }
     )
     if (containerRef.current) observer.observe(containerRef.current)
     return () => observer.disconnect()
-  }, [hasStarted])
+  }, [phase])
 
+  // Typing effect
   useEffect(() => {
-    if (!hasStarted) return
+    if (phase !== "typing-deploy" && phase !== "typing-update") return
+    const cmd = phase === "typing-deploy" ? deployCommand : updateCommand
     let i = 0
+    setTypingText("")
     const timer = setInterval(() => {
-      if (i <= command.length) {
-        setTypingText(command.slice(0, i))
+      if (i <= cmd.length) {
+        setTypingText(cmd.slice(0, i))
         i++
       } else {
         clearInterval(timer)
-        setShowCommand(true)
+        setPhase(phase === "typing-deploy" ? "deploy" : "update")
       }
     }, 35)
     return () => clearInterval(timer)
-  }, [hasStarted, command])
+  }, [phase])
 
+  // Deploy lines animation
   useEffect(() => {
-    if (!showCommand) return
+    if (phase !== "deploy") return
+    setVisibleCount(0)
     const timers: ReturnType<typeof setTimeout>[] = []
-    lines.forEach((line, i) => {
+    deployLines.forEach((line, i) => {
       timers.push(
-        setTimeout(() => {
-          setVisibleCount(i + 1)
-        }, line.delay)
+        setTimeout(() => setVisibleCount(i + 1), line.delay)
+      )
+    })
+    // After deploy finishes, pause then start update
+    const lastDelay = deployLines[deployLines.length - 1].delay
+    timers.push(
+      setTimeout(() => setPhase("pause"), lastDelay + 1500)
+    )
+    return () => timers.forEach(clearTimeout)
+  }, [phase])
+
+  // Pause then start update typing
+  useEffect(() => {
+    if (phase !== "pause") return
+    const timer = setTimeout(() => setPhase("typing-update"), 800)
+    return () => clearTimeout(timer)
+  }, [phase])
+
+  // Update lines animation
+  useEffect(() => {
+    if (phase !== "update") return
+    setVisibleCount(0)
+    const timers: ReturnType<typeof setTimeout>[] = []
+    updateLines.forEach((line, i) => {
+      timers.push(
+        setTimeout(() => setVisibleCount(i + 1), line.delay)
       )
     })
     return () => timers.forEach(clearTimeout)
-  }, [showCommand])
+  }, [phase])
 
+  // Auto-scroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [visibleCount, typingText])
+  }, [visibleCount, typingText, phase])
+
+  const currentLines = phase === "update" ? updateLines : deployLines
+  const isTyping = phase === "typing-deploy" || phase === "typing-update"
+  const showLines = phase === "deploy" || phase === "update"
+  const showDeployDone = phase === "pause" || phase === "typing-update" || phase === "update"
 
   return (
     <section ref={containerRef} className="flex justify-center px-6 py-16">
@@ -100,52 +161,117 @@ export function TerminalDemo() {
           </div>
 
           {/* Terminal content */}
-          <div ref={scrollRef} className="h-[380px] overflow-y-auto p-5 font-mono text-sm leading-relaxed">
-            <div className="mb-3 text-muted-foreground">
+          <div ref={scrollRef} className="h-[420px] overflow-y-auto p-5 font-mono text-sm leading-relaxed">
+            {/* Deploy command */}
+            <div className={`mb-3 ${showDeployDone ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
               <span className="text-primary">$</span>{" "}
-              <span className="text-foreground">
-                {typingText}
-                {!showCommand && hasStarted && (
+              <span className={showDeployDone ? "text-foreground/50" : "text-foreground"}>
+                {phase === "typing-deploy" ? typingText : (phase !== "idle" ? deployCommand : "")}
+                {phase === "typing-deploy" && (
                   <span className="inline-block w-2 h-4 ml-0.5 bg-primary animate-cursor-blink align-middle" />
                 )}
               </span>
             </div>
 
-            <AnimatePresence>
-              {lines.slice(0, visibleCount).map((line, i) => {
-                if (!line.content) return <div key={i} className="h-3" />
-                return (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.2 }}
-                    className="flex gap-2"
-                  >
-                    {line.prefix && (
-                      <span className={`shrink-0 ${line.success ? "text-primary" : "text-muted-foreground/60"}`}>
-                        {line.prefix}
-                      </span>
-                    )}
-                    <span
-                      className={
-                        line.success
-                          ? "font-bold text-primary"
-                          : line.link
-                            ? "text-primary underline underline-offset-2"
-                            : line.highlight
-                              ? "text-foreground"
-                              : "text-muted-foreground"
-                      }
+            {/* Deploy output */}
+            {(phase === "deploy" || showDeployDone) && (
+              <AnimatePresence>
+                {(showDeployDone ? deployLines : deployLines.slice(0, visibleCount)).map((line, i) => {
+                  if (!line.content) return <div key={`d-${i}`} className="h-3" />
+                  return (
+                    <motion.div
+                      key={`d-${i}`}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: showDeployDone ? 0.4 : 1 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex gap-2"
                     >
-                      {line.content}
-                    </span>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
+                      {line.prefix && (
+                        <span className={`shrink-0 ${line.success ? (showDeployDone ? "text-primary/40" : "text-primary") : "text-muted-foreground/60"}`}>
+                          {line.prefix}
+                        </span>
+                      )}
+                      <span
+                        className={
+                          showDeployDone
+                            ? "text-foreground/40"
+                            : line.success
+                              ? "font-bold text-primary"
+                              : line.link
+                                ? "text-primary underline underline-offset-2"
+                                : line.highlight
+                                  ? "text-foreground"
+                                  : "text-muted-foreground"
+                        }
+                      >
+                        {line.content}
+                      </span>
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            )}
 
-            {showCommand && visibleCount < lines.length && (
+            {/* Separator between deploy and update */}
+            {(phase === "typing-update" || phase === "update") && (
+              <div className="my-4 border-t border-border/50" />
+            )}
+
+            {/* Update command */}
+            {(phase === "typing-update" || phase === "update") && (
+              <div className="mb-3 text-muted-foreground">
+                <span className="text-primary">$</span>{" "}
+                <span className="text-foreground">
+                  {phase === "typing-update" ? typingText : updateCommand}
+                  {phase === "typing-update" && (
+                    <span className="inline-block w-2 h-4 ml-0.5 bg-primary animate-cursor-blink align-middle" />
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Update output */}
+            {phase === "update" && (
+              <AnimatePresence>
+                {updateLines.slice(0, visibleCount).map((line, i) => {
+                  if (!line.content) return <div key={`u-${i}`} className="h-3" />
+                  return (
+                    <motion.div
+                      key={`u-${i}`}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex gap-2"
+                    >
+                      {line.prefix && (
+                        <span className={`shrink-0 ${line.success ? "text-primary" : "text-muted-foreground/60"}`}>
+                          {line.prefix}
+                        </span>
+                      )}
+                      <span
+                        className={
+                          line.success
+                            ? "font-bold text-primary"
+                            : line.link
+                              ? "text-primary underline underline-offset-2"
+                              : line.highlight
+                                ? "text-foreground"
+                                : "text-muted-foreground"
+                        }
+                      >
+                        {line.content}
+                      </span>
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            )}
+
+            {/* Cursor while lines are loading */}
+            {phase === "deploy" && visibleCount < deployLines.length && (
+              <span className="inline-block h-4 w-2 bg-primary/80 animate-cursor-blink" />
+            )}
+            {phase === "update" && visibleCount < updateLines.length && (
               <span className="inline-block h-4 w-2 bg-primary/80 animate-cursor-blink" />
             )}
           </div>

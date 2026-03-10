@@ -34,7 +34,7 @@ export function TerminalHero() {
         className="mb-8 flex items-center gap-2 rounded-full border border-border bg-secondary px-4 py-1.5 font-mono text-xs text-muted-foreground"
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-        v1.0.5 — Agent Skill for AI Coding Assistants
+        v1.1.0 — Agent Skill for AI Coding Assistants
       </motion.div>
 
       {/* ASCII Art Title */}
@@ -65,7 +65,7 @@ export function TerminalHero() {
         transition={{ duration: 0.5, delay: 0.35 }}
         className="mb-4 text-center font-mono text-3xl font-bold tracking-tight text-foreground md:text-5xl text-balance"
       >
-        <span className="text-primary">Deploy</span> Skill
+        <span className="text-primary">Deploy & Update</span> Skill
       </motion.h2>
 
       <motion.p
@@ -74,7 +74,7 @@ export function TerminalHero() {
         transition={{ duration: 0.5, delay: 0.45 }}
         className="mb-10 max-w-xl text-center font-mono text-sm leading-relaxed text-muted-foreground md:text-base"
       >
-        One command to deploy any GitHub project to Sealos Cloud.
+        One command to deploy and update any project on Sealos Cloud.
         <br className="hidden md:block" />
         Works with Claude Code, Gemini CLI, Codex — any AI coding assistant.
       </motion.p>

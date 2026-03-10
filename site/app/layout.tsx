@@ -8,7 +8,7 @@ const _jetbrainsMono = JetBrains_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'Seakills — One Command Deployment Skill',
-  description: 'One command to deploy any GitHub project to Sealos Cloud. Works with Claude Code, Gemini CLI, Codex — any AI coding assistant.',
+  description: 'One command to deploy and update any project on Sealos Cloud. Works with Claude Code, Gemini CLI, Codex — any AI coding assistant.',
   generator: 'v0.app',
   icons: {
     icon: [
