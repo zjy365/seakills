@@ -51,10 +51,14 @@ Skills reference paths with `<SKILL_DIR>` for self and `<SKILL_DIR>/../other-ski
 
 ### Deployment pipeline (sealos-deploy)
 ```
-Preflight → Assess (score<4 = stop) → Detect image (found? skip build) →
-Generate Dockerfile → Build & Push → Generate Sealos Template → Deploy
+Preflight → Mode Detection → DEPLOY or UPDATE
+
+DEPLOY: Assess → Detect image → Dockerfile → Build & Push → Template → Deploy
+UPDATE: Build & Push → kubectl set image → Verify rollout (auto-rollback on failure)
 ```
-State is tracked in `deploy-out/context.json` for resume capability.
+Mode Detection reads `deploy-out/context.json` `deployed` field. If a running deployment is found (verified via kubectl), the skill enters UPDATE mode and skips assess/template/deploy phases. If not, it runs the full DEPLOY pipeline.
+
+State is tracked in `deploy-out/context.json`. The `deployed` section (written after first deploy) records app_name, namespace, current_image, and URL — enabling future updates without re-deploying from scratch.
 
 ### Installer (`install.sh`)
 Downloads skills from site distribution (with GitHub fallback), installs to `~/.agents/skills/` (canonical), then symlinks to each detected agent's skills directory.

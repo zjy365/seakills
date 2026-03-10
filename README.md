@@ -24,53 +24,67 @@ Skills are installed once to `~/.agents/skills/` (canonical), then symlinked to 
 
 ## Skills
 
-### `/sealos-deploy` — Deploy any project
+### `/sealos-deploy` — Deploy & update any project
 
 ```
-/sealos-deploy                                       # deploy current project
+/sealos-deploy                                       # deploy or update current project
 /sealos-deploy https://github.com/labring-sigs/kite  # deploy remote repo
 ```
 
-The skill handles everything:
+One command for both first deploy and subsequent updates. The skill auto-detects whether the project is already running on Sealos and chooses the right path.
+
+**First deploy:**
 
 ```
-[preflight] ✓ Docker  ✓ Docker Hub  ✓ Sealos Cloud
-[assess]    Go + net/http → suitable for deployment
+[preflight] ✓ Docker  ✓ git  ✓ Sealos Cloud
+[assess]    Go + net/http → score 10/12, suitable
 [detect]    Found ghcr.io/zxh326/kite:v0.4.0 (amd64) → skip build
-[template]  Generated deploy-out/template/kite/index.yaml
+[template]  Generated Sealos template
 [deploy]    ✓ Deployed to Sealos Cloud
+```
+
+**Update (same command, auto-detected):**
+
+```
+[detect]    Found existing deployment kite-x8k2m1nq
+[build]     Built & pushed zhujingyang/kite:20260310-143022
+[update]    ✓ Image updated, rollout complete
 ```
 
 **Pipeline:**
 
 ```
-Your project
+/sealos-deploy
   │
   ▼
-Assess ─── not deployable? → stop with reason
+Preflight — Docker, git, kubectl, Sealos auth
   │
   ▼
-Detect existing image ─── found? → skip build ──┐
-  │ not found                                    │
-  ▼                                              │
-Generate Dockerfile (if missing)                 │
-  │                                              │
-  ▼                                              │
-Build & Push to Docker Hub                       │
-  │                                              │
-  ◄──────────────────────────────────────────────┘
+Existing deployment found?
+  ├── Yes ──→ UPDATE: rebuild image → kubectl set image → verify rollout
+  │           (auto-rollback on failure)
   │
-  ▼
-Generate Sealos Template
-  │
-  ▼
-Deploy to Sealos Cloud
-  │
-  ▼
-Done ✓
+  └── No ───→ DEPLOY:
+              Assess ─── not deployable? → stop with reason
+                │
+                ▼
+              Detect existing image ─── found? → skip build ──┐
+                │ not found                                    │
+                ▼                                              │
+              Generate Dockerfile (if missing)                 │
+                │                                              │
+                ▼                                              │
+              Build & Push to Docker Hub                       │
+                │                                              │
+                ◄──────────────────────────────────────────────┘
+                │
+                ▼
+              Generate Sealos Template → Deploy → Done ✓
 ```
 
 **First time setup:** On first use, the skill checks and guides you through Docker, Docker Hub login, and Sealos Cloud OAuth — all interactive, no manual token copy-paste.
+
+**Updating:** Just run `/sealos-deploy` again after changing your code. The skill finds the running deployment, rebuilds the image, and does a rolling update with zero downtime. If the new version fails health checks, it auto-rolls back.
 
 ### Coming Soon
 
@@ -101,6 +115,7 @@ seakills/
 
 - Docker + Docker Hub account (for building & pushing images)
 - [Sealos Cloud](https://sealos.run) account
+- kubectl (optional — enables in-place updates of deployed apps)
 
 ## License
 

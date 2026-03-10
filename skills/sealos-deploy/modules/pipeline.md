@@ -44,9 +44,98 @@ Write `deploy-out/context.json` with the initial project section:
 }
 ```
 
+## Deployment Mode Detection
+
+After preflight, determine whether this is a **first deploy** or an **update** of an existing deployment.
+
+### Step 1: Check for previous deployment state
+
+Read `deploy-out/context.json` in `WORK_DIR`. If it exists and contains a `deployed` key with `app_name`, proceed to Step 2.
+
+If no `deployed` key → proceed to **Step 1.5** (attempt discovery from cluster).
+
+### Step 1.5: Discover existing deployment from cluster (migration)
+
+Projects deployed by an older version of the skill may have no `deployed` section in context.json (or no context.json at all). If `ENV.kubectl` is true and `~/.sealos/kubeconfig` exists, attempt to discover an existing deployment by project name:
+
+```bash
+# Derive the namespace from the sealos kubeconfig
+NAMESPACE=$(KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  config view --minify -o jsonpath='{.contexts[0].context.namespace}' 2>/dev/null)
+
+# Search for a deployment whose name starts with the repo name
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  get deploy -n "$NAMESPACE" \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.template.spec.containers[0].image}{"\n"}{end}' 2>/dev/null \
+  | grep -i "^$REPO_NAME"
+```
+
+**If a match is found** (e.g., `evershop-uvbp0n0n	zhujingyang/evershop:20260309`):
+
+1. Query the full details to reconstruct the `deployed` state:
+```bash
+# Get the ingress host
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  get ingress/<app_name> -n "$NAMESPACE" \
+  -o jsonpath='{.spec.rules[0].host}' 2>/dev/null
+```
+
+2. Present to user for confirmation:
+```
+Found an existing deployment that appears to match this project:
+
+  App:       evershop-uvbp0n0n
+  Image:     zhujingyang/evershop:20260309
+  URL:       https://evershop-4ha6b4mh.gzg.sealos.run
+  Namespace: ns-qiqovyrm
+
+  Is this the deployment you want to update? (y/n)
+```
+
+3. If user confirms → write the reconstructed `deployed` section to `deploy-out/context.json` (create file if needed), then proceed to Step 2.
+
+4. If user says no, or no match found → **DEPLOY mode** (skip to Resume Detection below).
+
+### Step 2: Verify deployment is still running (requires kubectl)
+
+If `ENV.kubectl` is false:
+- Inform user: `"Found previous deployment record for {app_name}, but kubectl is not available. Will create a new instance instead."`
+- → **DEPLOY mode**
+
+If `ENV.kubectl` is true, query the cluster:
+```bash
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  get deployment/<app_name> -n <namespace> \
+  -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null
+```
+
+- Command fails (deployment deleted or kubeconfig expired) → **DEPLOY mode** (clear `deployed` from context.json)
+- Command returns current image → proceed to Step 3
+
+### Step 3: Ask user
+
+Present the detected state and let the user choose:
+
+```
+Detected existing deployment:
+  App:   <app_name>
+  Image: <current_image>
+  URL:   <url>
+
+  1. Update this deployment (rebuild & push new image)
+  2. Deploy as a new instance
+
+Default: Update
+```
+
+- User picks **Update** → **UPDATE mode** (jump to Update Path below)
+- User picks **New instance** → **DEPLOY mode** (rename context.json to context.json.bak)
+
+---
+
 ## Resume Detection
 
-Before starting Phase 1, check if `deploy-out/context.json` already exists in `WORK_DIR`:
+**Only applies in DEPLOY mode.** If `deploy-out/context.json` exists but has no `deployed` key (incomplete previous deploy):
 
 1. If exists, read it and report to user:
    `"Found previous deployment context. Completed phases: {list phases with completed_at}."`
@@ -301,7 +390,7 @@ If user doesn't have a Docker Hub account → guide to https://hub.docker.com/si
 
 ### 4.1 Build & Push
 
-Tag format: `<DOCKER_HUB_USER>/<repo-name>:YYYYMMDD` (e.g., `zhujingyang/kite:20260304`).
+Tag format: `<DOCKER_HUB_USER>/<repo-name>:YYYYMMDD-HHMMSS` (e.g., `zhujingyang/kite:20260304-143022`). The timestamp ensures same-day rebuilds never collide.
 
 **If Node.js available:**
 ```bash
@@ -311,7 +400,7 @@ Output: `{ "success": true, "image": "..." }` or `{ "success": false, "error": "
 
 **If Node.js not available (fallback — run docker directly):**
 ```bash
-TAG=$(date +%Y%m%d)
+TAG=$(date +%Y%m%d-%H%M%S)
 IMAGE="<DOCKER_HUB_USER>/<repo-name>:$TAG"
 docker buildx build --platform linux/amd64 -t "$IMAGE" --push -f Dockerfile "$WORK_DIR"
 ```
@@ -756,6 +845,39 @@ Read `deploy-out/context.json`, merge the following into the `deploy` key, then 
 | `url` | Public app URL |
 | `region` | Sealos region URL |
 
+### Checkpoint: deployed (top-level)
+
+**This is critical for enabling future updates.** After a successful deploy, also write a top-level `deployed` key to `deploy-out/context.json`:
+
+```json
+{
+  "deployed": {
+    "app_name": "<instance name, e.g. evershop-uvbp0n0n>",
+    "app_host": "<ingress host prefix, e.g. evershop-4ha6b4mh>",
+    "namespace": "<K8s namespace from kubeconfig>",
+    "region": "<Sealos region domain, e.g. gzg.sealos.run>",
+    "current_image": "<IMAGE_REF used in this deploy>",
+    "docker_hub_user": "<DOCKER_HUB_USER, or null if existing image was used>",
+    "repo_name": "<REPO_NAME>",
+    "url": "<public app URL>",
+    "deployed_at": "<current ISO timestamp>",
+    "last_updated_at": "<current ISO timestamp>"
+  }
+}
+```
+
+The `deployed` section is what **Deployment Mode Detection** reads on subsequent runs to decide between DEPLOY and UPDATE mode. Without it, every `/sealos-deploy` creates a new instance.
+
+Sources for each field:
+- `app_name`: from `deploy.instance` (Template API response) or the rendered `defaults.app_name` (kubectl apply)
+- `app_host`: from the rendered `defaults.app_host` value, or parsed from the Ingress host
+- `namespace`: from kubeconfig context or `deploy.namespace`
+- `region`: from `~/.sealos/auth.json` `region` field (strip `https://`)
+- `current_image`: from `image_ref` (top-level context field)
+- `docker_hub_user`: from Phase 4 `DOCKER_HUB_USER` (null if Phase 2 found existing image)
+- `repo_name`: from `PROJECT.repo_name`
+- `url`: from `deploy.url`
+
 ---
 
 ## Cleanup
@@ -790,3 +912,160 @@ Configuration applied:
   OPENAI_API_KEY: sk-***...*** (masked)
 ```
 Mask sensitive values (API keys, passwords) — show only first 3 and last 3 characters.
+
+---
+---
+
+# Update Path
+
+**This section is only executed in UPDATE mode** (entered via Deployment Mode Detection above).
+
+The update path skips Assess, Detect Image, Dockerfile, and Template generation — it reuses the existing deployment and only pushes a new image.
+
+All kubectl commands use the Sealos kubeconfig:
+```
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify
+```
+
+### kubectl Safety Rules (MUST follow)
+
+The Sealos kubeconfig has **real cluster permissions**. Destructive operations can permanently lose user data and running services.
+
+**Allowed operations — read and in-place update only:**
+- `kubectl get` — read resources
+- `kubectl set image` — update container image
+- `kubectl patch` — update specific fields
+- `kubectl rollout status` — watch rollout progress
+- `kubectl rollout undo` — revert to previous revision (only on failed rollout)
+- `kubectl rollout restart` — restart pods with same config
+- `kubectl logs` — read pod logs for debugging
+
+**NEVER run these — no exceptions:**
+- `kubectl delete` — never delete deployments, services, ingresses, PVCs, databases, or any resource
+- `kubectl replace` — can overwrite resources and lose fields
+- `kubectl scale ... --replicas=0` — equivalent to taking the app offline
+- `kubectl edit` — opens interactive editor, not suitable for automation
+- `kubectl apply` with incomplete YAML — can remove fields that were previously set
+
+If a situation seems to require deleting or replacing a resource, **stop and ask the user** rather than proceeding.
+
+## Context from Mode Detection
+
+These values are already known from `deploy-out/context.json` `deployed` section:
+
+```
+APP_NAME      = deployed.app_name       (e.g., "evershop-uvbp0n0n")
+NAMESPACE     = deployed.namespace      (e.g., "ns-qiqovyrm")
+REGION        = deployed.region         (e.g., "gzg.sealos.run")
+CURRENT_IMAGE = deployed.current_image  (e.g., "zhujingyang/evershop:20260309")
+DOCKER_HUB_USER = deployed.docker_hub_user
+REPO_NAME     = deployed.repo_name
+APP_URL       = deployed.url
+```
+
+---
+
+## Phase U1: Build & Push
+
+Ask the user what changed:
+
+```
+What would you like to update?
+
+  1. Code changed — rebuild and push new image (default)
+  2. Just restart the current deployment (no rebuild)
+```
+
+### Option 1: Rebuild
+
+Reuse the **exact same build logic as Phase 4** — same Dockerfile, same build-push.mjs or fallback.
+
+```bash
+# With Node.js:
+node "<SKILL_DIR>/scripts/build-push.mjs" "$WORK_DIR" "$DOCKER_HUB_USER" "$REPO_NAME"
+
+# Without Node.js:
+TAG=$(date +%Y%m%d-%H%M%S)
+NEW_IMAGE="$DOCKER_HUB_USER/$REPO_NAME:$TAG"
+docker buildx build --platform linux/amd64 -t "$NEW_IMAGE" --push -f Dockerfile "$WORK_DIR"
+```
+
+Record `NEW_IMAGE` from the output.
+
+If build fails → same error handling as Phase 4.2 (read error-patterns.md, fix Dockerfile, retry up to 3 times).
+
+### Option 2: Restart only
+
+No build needed. Use the current image:
+```
+NEW_IMAGE = CURRENT_IMAGE
+```
+
+Will trigger a rollout restart in Phase U2.
+
+---
+
+## Phase U2: Apply Update
+
+### Image update (Option 1 — new image built):
+
+```bash
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  set image deployment/$APP_NAME \
+  $APP_NAME=$NEW_IMAGE \
+  -n $NAMESPACE
+```
+
+### Restart only (Option 2 — no new image):
+
+```bash
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  rollout restart deployment/$APP_NAME \
+  -n $NAMESPACE
+```
+
+---
+
+## Phase U3: Verify Rollout
+
+### Wait for new pods to be ready:
+
+```bash
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  rollout status deployment/$APP_NAME \
+  -n $NAMESPACE --timeout=120s
+```
+
+### On success:
+
+Update `deploy-out/context.json`:
+- Set `deployed.current_image` to `NEW_IMAGE`
+- Set `deployed.last_updated_at` to current ISO timestamp
+
+Present to user:
+```
+✓ Updated: <APP_NAME>
+✓ Image: <CURRENT_IMAGE> → <NEW_IMAGE>
+✓ Rollout: complete
+
+App URL: <APP_URL>
+```
+
+### On failure:
+
+Auto-rollback:
+```bash
+KUBECONFIG=~/.sealos/kubeconfig kubectl --insecure-skip-tls-verify \
+  rollout undo deployment/$APP_NAME \
+  -n $NAMESPACE
+```
+
+Report to user:
+```
+✗ Rollout failed — automatically rolled back to previous version.
+
+Debug:
+  kubectl logs deployment/<APP_NAME> -n <NAMESPACE> --tail=50
+```
+
+Do NOT update `deployed.current_image` on failure — it stays at the old value.
