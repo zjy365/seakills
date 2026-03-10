@@ -61,7 +61,7 @@ function deriveProfileName(apiUrl) {
   try {
     const host = new URL(apiUrl).hostname;
     const parts = host.split('.');
-    // devbox.usw.sailos.io → usw.sailos
+    // devbox.gzg.sealos.io → gzg.sealos
     if (parts[0] === 'devbox' && parts.length > 2) {
       return parts.slice(1, -1).join('.');
     }
@@ -80,7 +80,7 @@ function loadConfig() {
   if (process.env.API_URL) {
     return {
       apiUrl: process.env.API_URL,
-      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.kube/config'),
+      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.sealos/kubeconfig'),
     };
   }
 
@@ -215,7 +215,7 @@ function deriveApiCandidates(serverUrl) {
   // 1. devbox.<full-hostname>
   add(`https://devbox.${hostname}${API_PATH}`);
 
-  // 2. Strip first subdomain (e.g., apiserver.usw.sailos.io → devbox.usw.sailos.io)
+  // 2. Strip first subdomain (e.g., apiserver.gzg.sealos.io → devbox.gzg.sealos.io)
   if (parts.length > 2) {
     add(`https://devbox.${parts.slice(1).join('.')}${API_PATH}`);
   }

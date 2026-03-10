@@ -55,18 +55,14 @@ Step 4: Update Memory       (save state for next session)
 
 ## Step 0: Check Memory
 
-Check for a memory file named `sealos-template.md` in the project's auto memory directory
-(the path is provided by the system environment, e.g. `~/.claude/projects/.../memory/sealos-template.md`).
+Check for memory file `sealos-template.md` in the project's auto memory directory.
 
 **If memory file exists and contains `kubeconfig_path` + `api_url`:**
 1. Verify the kubeconfig file still exists at the saved path
-2. If memory has a `profile` field, ensure the script's active profile matches:
-   run `node scripts/sealos-template.mjs profiles` and compare. If different,
-   run `node scripts/sealos-template.mjs use <profile>` to switch first.
-3. Run `node scripts/sealos-template.mjs list` (auto-loads config) to test connection
-4. If works → skip Step 1. Greet with context:
-   > Connected to Sealos (`{profile}`). {N} templates available.
-5. If fails → proceed to Step 1, mention connection issue
+2. Run `node scripts/sealos-template.mjs list` (auto-loads config) to test connection
+3. If works → skip Step 1. Greet with context:
+   > Connected to Sealos. {N} templates available.
+4. If fails → proceed to Step 1, mention connection issue
 
 **If no memory file or missing auth fields:**
 1. Run `node scripts/sealos-auth.mjs check`
@@ -118,10 +114,19 @@ Run `node scripts/sealos-template.mjs init ~/.sealos/kubeconfig`. This single co
 `AskUserQuestion`:
 - header: "API URL"
 - question: "Could not auto-detect API URL. What is your Sealos domain?"
-- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., usw.sailos.io)"
+- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., gzg.sealos.io)"
 - options: ["I'll check my Sealos Console"]
 
 Then run: `node scripts/sealos-template.mjs init ~/.sealos/kubeconfig https://template.<domain>`
+
+**If `init` returns an `authError`** (has `[public-data]` but `[auth-data]: null`):
+The API URL is correct but the kubeconfig token has expired.
+
+1. Display:
+   > API connection successful, but your kubeconfig token has expired.
+2. Re-run `node scripts/sealos-auth.mjs login` to re-authenticate
+3. After login succeeds → re-run `node scripts/sealos-template.mjs init ~/.sealos/kubeconfig`
+4. Clear the memory file's `Auth` section so stale credentials aren't reused.
 
 **If `init` succeeds:**
 The response includes `profileName` and `templateCount`. Display:
@@ -140,7 +145,7 @@ Determine the operation from user intent:
 | "deploy X" / "I need X" | Deploy |
 | "deploy this YAML" / "deploy custom template" | Deploy Raw |
 | "show template details" / "what does X need" | Details |
-| "switch cluster/profile/account" | Profile |
+
 
 If ambiguous, ask one clarifying question.
 
@@ -223,35 +228,6 @@ If ambiguous, ask one clarifying question.
 
 ---
 
-### Profile (Switch Cluster)
-
-The script supports multiple Sealos clusters via named profiles. Each `init` auto-creates
-a profile named after the domain (e.g., `usw.sailos`). Existing profiles are preserved.
-
-**List profiles:** Run `node scripts/sealos-template.mjs profiles`. Display as table:
-
-```
-Profile       API URL                                          Active
-usw.sailos    https://template.usw.sailos.io/api/v2alpha       ✓
-cn.sailos     https://template.cn.sailos.io/api/v2alpha
-```
-
-**Switch profile:** `AskUserQuestion` with profile names as options
-(header: "Profile", question: "Which cluster?"). Then run:
-`node scripts/sealos-template.mjs use <name>`
-
-**Add new cluster:** `AskUserQuestion`:
-- header: "Add Cluster"
-- question: "How to connect to the new cluster?"
-- options: ["OAuth2 Login (Recommended)", "Use existing kubeconfig file"]
-
-If "OAuth2 Login" → run Step 1a (OAuth2 login), then Step 1b (init with `~/.sealos/kubeconfig`).
-If "Use existing kubeconfig file" → `AskUserQuestion` asking for the file path, then run
-`node scripts/sealos-template.mjs init <path>`. `init` auto-creates a new profile from the domain
-without removing existing ones.
-
----
-
 ## Step 4: Update Memory
 
 After every successful operation, update the memory file named `sealos-template.md`
@@ -261,7 +237,7 @@ in the project's auto memory directory.
 
 | Event | Save |
 |-------|------|
-| Successful auth (Step 1) | `profile`, `kubeconfig_path`, `api_url` |
+| Successful auth (Step 1) | `kubeconfig_path`, `api_url` |
 | After deploy | Add instance to recent deploys |
 | After browse/details | Update last browsed info |
 
@@ -272,9 +248,8 @@ in the project's auto memory directory.
 
 ## Auth
 - auth_method: oauth2
-- profile: usw.sailos
 - kubeconfig_path: ~/.sealos/kubeconfig
-- api_url: https://template.usw.sailos.io/api/v2alpha
+- api_url: https://template.gzg.sealos.io/api/v2alpha
 
 ## Recent Deploys
 - my-perplexica: perplexica, 2026-01-28
@@ -337,9 +312,6 @@ node $SCRIPT create '{"name":"my-app","template":"perplexica","args":{"OPENAI_AP
 node $SCRIPT create-raw '{"yaml":"apiVersion: app.sealos.io/v1\nkind: Template\n...","dryRun":true}'
 node $SCRIPT create-raw /path/to/body.json  # read JSON body from file
 
-# Multi-cluster profile management
-node $SCRIPT profiles               # list all saved profiles
-node $SCRIPT use usw.sailos          # switch active profile
 ```
 
 ## Reference Files

@@ -62,12 +62,9 @@ Check for memory file `sealos-devbox.md` in the project's auto memory directory.
 
 **If memory file exists and contains `kubeconfig_path` + `api_url`:**
 1. Verify the kubeconfig file still exists at the saved path
-2. If memory has a `profile` field, ensure the script's active profile matches:
-   run `node scripts/sealos-devbox.mjs profiles` and compare. If different,
-   run `node scripts/sealos-devbox.mjs use <profile>` to switch first.
-3. Run `node scripts/sealos-devbox.mjs list` to test auth
-4. If works → skip Step 1. Greet with context.
-5. If fails (401, file missing) → proceed to Step 1
+2. Run `node scripts/sealos-devbox.mjs list` to test auth
+3. If works → skip Step 1. Greet with context.
+4. If fails (401, file missing) → proceed to Step 1
 
 **If no memory file or missing auth fields:**
 1. Run `node scripts/sealos-auth.mjs check`
@@ -115,14 +112,19 @@ Run `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig`. This single comm
 `AskUserQuestion`:
 - header: "API URL"
 - question: "Could not auto-detect API URL. What is your Sealos domain?"
-- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., usw.sailos.io)"
+- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., gzg.sealos.io)"
 - options: ["I'll check my Sealos Console"]
 
 Then run: `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig https://devbox.<domain>`
 
 **If `init` returns an `authError`** (has `templates` but `devboxes: null`):
-The API URL is correct but the kubeconfig token has expired. Re-run Step 1a (OAuth2 login),
-then retry init. Clear the memory file's `Auth` section so stale credentials aren't reused.
+The API URL is correct but the kubeconfig token has expired.
+
+1. Display:
+   > API connection successful, but your kubeconfig token has expired.
+2. Re-run `node scripts/sealos-auth.mjs login` to re-authenticate
+3. After login succeeds → re-run `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig`
+4. Clear the memory file's `Auth` section so stale credentials aren't reused.
 
 **If `init` succeeds fully** (has `templates` and `devboxes`, no `authError`):
 The response includes `templates`, `devboxes`, and `profileName`. Display:
@@ -149,7 +151,7 @@ Determine the operation from user intent:
 | "deploy/ship to production" | Deploy |
 | "monitor/metrics/CPU/memory usage" | Monitor |
 | "autostart/startup command" | Autostart |
-| "switch cluster/profile/account" | Profile |
+
 
 If ambiguous, ask one clarifying question.
 
@@ -544,35 +546,6 @@ or `node scripts/sealos-devbox.mjs autostart {name}` for default behavior.
 
 ---
 
-### Profile (Switch Cluster)
-
-The script supports multiple Sealos clusters via named profiles. Each `init` auto-creates
-a profile named after the domain (e.g., `usw.sailos`). Existing profiles are preserved.
-
-**List profiles:** Run `node scripts/sealos-devbox.mjs profiles`. Display as table:
-
-```
-Profile       API URL                                        Active
-usw.sailos    https://devbox.usw.sailos.io/api/v2alpha       ✓
-cn.sailos     https://devbox.cn.sailos.io/api/v2alpha
-```
-
-**Switch profile:** `AskUserQuestion` with profile names as options
-(header: "Profile", question: "Which cluster?"). Then run:
-`node scripts/sealos-devbox.mjs use <name>`
-
-**Add new cluster:** `AskUserQuestion`:
-- header: "Add Cluster"
-- question: "How to connect to the new cluster?"
-- options: ["OAuth2 Login (Recommended)", "Use existing kubeconfig file"]
-
-If "OAuth2 Login" → run Step 1a (OAuth2 login), then Step 1b (init with `~/.sealos/kubeconfig`).
-If "Use existing kubeconfig file" → `AskUserQuestion` asking for the file path, then run
-`node scripts/sealos-devbox.mjs init <path>`. `init` auto-creates a new profile from the domain
-without removing existing ones.
-
----
-
 ## Step 4: Update Memory
 
 After every successful operation, update the memory file named `sealos-devbox.md`
@@ -582,7 +555,7 @@ in the project's auto memory directory.
 
 | Event | Save |
 |-------|------|
-| Successful auth (Step 1) | `profile`, `kubeconfig_path`, `api_url`, `namespace` |
+| Successful auth (Step 1) | `kubeconfig_path`, `api_url`, `namespace` |
 | After create | Add devbox to list, update `preferred_runtime` |
 | After delete | Remove devbox from list |
 | After list/get | Refresh devboxes list with current state |
@@ -594,9 +567,8 @@ in the project's auto memory directory.
 
 ## Auth
 - auth_method: oauth2
-- profile: usw.sailos
 - kubeconfig_path: ~/.sealos/kubeconfig
-- api_url: https://devbox.usw.sailos.io/api/v2alpha
+- api_url: https://devbox.gzg.sealos.io/api/v2alpha
 - namespace: ns-xxx
 
 ## Devboxes
@@ -679,9 +651,6 @@ node $SCRIPT list-deployments my-devbox
 node $SCRIPT monitor my-devbox
 node $SCRIPT monitor my-devbox 1760510280 1760513880 5m
 
-# Multi-cluster profile management
-node $SCRIPT profiles               # list all saved profiles
-node $SCRIPT use usw.sailos          # switch active profile
 ```
 
 ## Reference Files

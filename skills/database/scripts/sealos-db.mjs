@@ -60,7 +60,7 @@ function deriveProfileName(apiUrl) {
   try {
     const host = new URL(apiUrl).hostname;
     const parts = host.split('.');
-    // dbprovider.usw.sailos.io → usw.sailos
+    // dbprovider.gzg.sealos.io → gzg.sealos
     if (parts[0] === 'dbprovider' && parts.length > 2) {
       return parts.slice(1, -1).join('.');
     }
@@ -79,7 +79,7 @@ function loadConfig() {
   if (process.env.API_URL) {
     return {
       apiUrl: process.env.API_URL,
-      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.kube/config'),
+      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.sealos/kubeconfig'),
     };
   }
 
@@ -203,7 +203,7 @@ function deriveApiCandidates(serverUrl) {
   // 1. dbprovider.<full-hostname>
   add(`https://dbprovider.${hostname}${API_PATH}`);
 
-  // 2. Strip first subdomain (e.g., apiserver.usw.sailos.io → dbprovider.usw.sailos.io)
+  // 2. Strip first subdomain (e.g., apiserver.gzg.sealos.io → dbprovider.gzg.sealos.io)
   if (parts.length > 2) {
     add(`https://dbprovider.${parts.slice(1).join('.')}${API_PATH}`);
   }

@@ -56,18 +56,14 @@ Step 4: Update Memory       (save state for next session)
 
 ## Step 0: Check Memory
 
-Check for a memory file named `sealos-applaunchpad.md` in the project's auto memory directory
-(the path is provided by the system environment, e.g. `~/.claude/projects/.../memory/sealos-applaunchpad.md`).
+Check for memory file `sealos-applaunchpad.md` in the project's auto memory directory.
 
 **If memory file exists and contains `kubeconfig_path` + `api_url`:**
 1. Verify the kubeconfig file still exists at the saved path
-2. If memory has a `profile` field, ensure the script's active profile matches:
-   run `node scripts/sealos-applaunchpad.mjs profiles` and compare. If different,
-   run `node scripts/sealos-applaunchpad.mjs use <profile>` to switch first.
-3. Run `node scripts/sealos-applaunchpad.mjs list` (auto-loads config) to test auth
-4. If works → skip Step 1. Greet with context:
-   > Connected to Sealos (`{profile}`). You have N apps running.
-5. If fails (401, file missing) → proceed to Step 1, mention the token may have expired
+2. Run `node scripts/sealos-applaunchpad.mjs list` (auto-loads config) to test auth
+3. If works → skip Step 1. Greet with context:
+   > Connected to Sealos. You have N apps running.
+4. If fails (401, file missing) → proceed to Step 1, mention the token may have expired
 
 **If no memory file or missing auth fields:**
 1. Run `node scripts/sealos-auth.mjs check`
@@ -115,7 +111,7 @@ Run `node scripts/sealos-applaunchpad.mjs init ~/.sealos/kubeconfig`. This singl
 `AskUserQuestion`:
 - header: "API URL"
 - question: "Could not auto-detect API URL. What is your Sealos domain?"
-- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., usw.sailos.io)"
+- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., gzg.sealos.io)"
 - options: ["I'll check my Sealos Console"]
 
 Then run: `node scripts/sealos-applaunchpad.mjs init ~/.sealos/kubeconfig https://applaunchpad.<domain>`
@@ -124,7 +120,7 @@ Then run: `node scripts/sealos-applaunchpad.mjs init ~/.sealos/kubeconfig https:
 The API URL is correct but the kubeconfig token has expired.
 
 1. Display:
-   > API connection successful (`{profileName}`), but your kubeconfig token has expired.
+   > API connection successful, but your kubeconfig token has expired.
 2. Re-run `node scripts/sealos-auth.mjs login` to re-authenticate
 3. After login succeeds → re-run `node scripts/sealos-applaunchpad.mjs init ~/.sealos/kubeconfig`
 4. Clear the memory file's `Auth` section so stale credentials aren't reused.
@@ -152,7 +148,7 @@ Determine the operation from user intent:
 | **"stop/pause"** | **Action (pause)** — explain: AppLaunchpad uses "pause" (scales to zero) |
 | "restart" | Action (restart) |
 | "expand storage/add volume" | Storage Update |
-| "switch cluster/profile/account" | Profile |
+
 
 If ambiguous, ask one clarifying question.
 
@@ -409,35 +405,6 @@ If user clicks Cancel → abort.
 
 ---
 
-### Profile (Switch Cluster)
-
-The script supports multiple Sealos clusters via named profiles. Each `init` auto-creates
-a profile named after the domain (e.g., `usw.sailos`). Existing profiles are preserved.
-
-**List profiles:** Run `node scripts/sealos-applaunchpad.mjs profiles`. Display as table:
-
-```
-Profile       API URL                                              Active
-usw.sailos    https://applaunchpad.usw.sailos.io/api/v2alpha       ✓
-cn.sailos     https://applaunchpad.cn.sailos.io/api/v2alpha
-```
-
-**Switch profile:** `AskUserQuestion` with profile names as options
-(header: "Profile", question: "Which cluster?"). Then run:
-`node scripts/sealos-applaunchpad.mjs use <name>`
-
-**Add new cluster:** `AskUserQuestion`:
-- header: "Add Cluster"
-- question: "How to connect to the new cluster?"
-- options: ["OAuth2 Login (Recommended)", "Use existing kubeconfig file"]
-
-If "OAuth2 Login" → run Step 1a (OAuth2 login), then Step 1b (init with `~/.sealos/kubeconfig`).
-If "Use existing kubeconfig file" → `AskUserQuestion` asking for the file path, then run
-`node scripts/sealos-applaunchpad.mjs init <path>`. `init` auto-creates a new profile from the domain
-without removing existing ones.
-
----
-
 ## Step 4: Update Memory
 
 After every successful operation, update the memory file named `sealos-applaunchpad.md`
@@ -447,7 +414,7 @@ in the project's auto memory directory.
 
 | Event | Save |
 |-------|------|
-| Successful auth (Step 1) | `profile`, `kubeconfig_path`, `api_url`, `namespace` |
+| Successful auth (Step 1) | `kubeconfig_path`, `api_url`, `namespace` |
 | After create | Add app to list |
 | After delete | Remove app from list |
 | After list/get | Refresh apps list with current state |
@@ -459,9 +426,8 @@ in the project's auto memory directory.
 
 ## Auth
 - auth_method: oauth2
-- profile: usw.sailos
 - kubeconfig_path: ~/.sealos/kubeconfig
-- api_url: https://applaunchpad.usw.sailos.io/api/v2alpha
+- api_url: https://applaunchpad.gzg.sealos.io/api/v2alpha
 - namespace: ns-xxx
 
 ## Apps
@@ -532,9 +498,6 @@ node $SCRIPT start|pause|restart my-app
 # Storage management (incremental merge, expand only)
 node $SCRIPT update-storage my-app '{"storage":[{"path":"/var/data","size":"20Gi"}]}'
 
-# Multi-cluster profile management
-node $SCRIPT profiles               # list all saved profiles
-node $SCRIPT use usw.sailos          # switch active profile
 ```
 
 ## Reference Files
