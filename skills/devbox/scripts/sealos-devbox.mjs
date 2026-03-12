@@ -67,7 +67,7 @@ function loadConfig() {
     throw new Error(`Kubeconfig not found at ${KC_PATH}. Run: node sealos-auth.mjs login`);
   }
 
-  return { apiUrl, kubeconfigPath: KC_PATH };
+  return { apiUrl, regionUrl: regionUrl.origin, kubeconfigPath: KC_PATH };
 }
 
 // --- SSH key management ---
@@ -370,9 +370,9 @@ async function createWait(cfg, jsonBody) {
   try {
     const info = await get(cfg, name);
     if (createResult.savedKeyPath) info.savedKeyPath = createResult.savedKeyPath;
-    return { ...info, warning: `Timed out after 2 minutes. Last status: ${info.status}` };
+    return { ...info, consoleUrl: cfg.regionUrl, warning: `Timed out after 2 minutes. Last status: ${info.status}` };
   } catch {
-    return { name, status: lastStatus, warning: 'Timed out after 2 minutes' };
+    return { name, status: lastStatus, consoleUrl: cfg.regionUrl, warning: 'Timed out after 2 minutes' };
   }
 }
 

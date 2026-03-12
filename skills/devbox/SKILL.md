@@ -6,7 +6,10 @@ description: >-
   manage ports, create releases, deploy to production, or monitor resource usage.
   Triggers on "I need a devbox", "create a Node.js devbox on sealos", "scale my devbox",
   "delete the devbox", "show my devboxes", "deploy my devbox", "get SSH info",
-  "pause the devbox", "create a release", or "my app needs a dev environment".
+  "pause the devbox", "create a release", "my app needs a dev environment",
+  "set up a cloud development environment", "I want to code on a remote server",
+  "remote dev machine", "how do I connect to my devbox via SSH",
+  "cloud IDE", "cloud workspace", or "spin up a dev environment on Sealos".
 ---
 
 ## Interaction Principle
@@ -119,7 +122,9 @@ If ambiguous, ask one clarifying question.
 **3a. Templates & existing devboxes**
 
 Use devboxes from the `list` response (Step 0 or 1b). Run `node scripts/sealos-devbox.mjs templates`
-to get available runtimes.
+to get available runtimes. If `templates` fails, tell the user the API is unavailable, offer to
+retry, or let them type a runtime name manually (refer to `references/api-reference.md` Available
+Runtimes for the known list).
 
 **3b. Ask name first**
 
@@ -211,6 +216,7 @@ If "Add custom port": ask for port number, protocol (http/grpc/ws), and isPublic
 
 **5) Env & Autostart** → Ask for environment variables (name=value pairs) and
 autostart command (optional). If user provides env vars, parse them into the array format.
+See also: Autostart operation in `references/operations.md` for standalone autostart configuration.
 
 After all fields, re-display the updated config summary and `AskUserQuestion`:
 - header: "Config"
@@ -288,6 +294,18 @@ See `references/api-reference.md` for allowed ranges.
 - "Remove a port" (list existing ports as sub-options)
 - "Toggle public access" (list existing ports)
 - "Replace all ports" (specify new port list)
+
+**3c-ports.** When ports are changing, display a clear before/after:
+
+```
+Ports (before → after):
+
+  ✓ 3000 http public     (keeping)
+  - 8080 http public     (removing)
+  + 9090 grpc private    (adding)
+```
+
+Warn if any existing ports will be removed. Require explicit confirmation for port removals.
 
 **3d.** Show before/after diff, then `AskUserQuestion` (header: "Confirm",
 question: "Apply these changes?"):
@@ -444,54 +462,13 @@ to verify.
 
 ### Monitor
 
-**3a.** If no name given → List, then `AskUserQuestion` to pick which devbox.
-
-**3b.** `AskUserQuestion` (header: "Time Range", question: "Monitoring period?"):
-- "Last 1 hour"
-- "Last 3 hours (default)"
-- "Last 24 hours"
-- "Custom range"
-
-For "Custom range": ask for start time, end time, and step interval.
-
-**3c.** Run `node scripts/sealos-devbox.mjs monitor {name} [start] [end] [step]`.
-
-**3d.** Display metrics as a table:
-
-```
-Time              CPU %    Memory %
-14:38             1.08     10.32
-14:40             1.18     10.37
-14:42             1.25     10.41
-```
-
-Highlight high utilization (>80%) with a warning.
+Read `references/operations.md` → Monitor section and follow the steps there.
 
 ---
 
 ### Autostart
 
-**3a.** If no name given → List, then `AskUserQuestion` to pick which devbox.
-
-**3b.** Run `node scripts/sealos-devbox.mjs get {name}` to show current state and runtime.
-
-**3c.** Suggest a startup command based on the runtime:
-
-| Runtime | Suggested command |
-|---------|-------------------|
-| node.js, next.js, express.js, react, vue, etc. | `npm start` or `npm run dev` |
-| python, django, flask | `python manage.py runserver` or `flask run` |
-| go, gin, echo, chi, iris | `go run .` |
-| rust, rocket | `cargo run` |
-| java, quarkus, vert.x | `mvn quarkus:dev` or `java -jar app.jar` |
-
-**3d.** `AskUserQuestion` (header: "Autostart", question: "Startup command?"):
-- Suggested command from table above
-- "No command (just enable autostart)"
-- "Custom command"
-
-**3e.** Run `node scripts/sealos-devbox.mjs autostart {name} '{"execCommand":"..."}'`
-or `node scripts/sealos-devbox.mjs autostart {name}` for default behavior.
+Read `references/operations.md` → Autostart section and follow the steps there.
 
 ---
 
@@ -556,8 +533,9 @@ node $SCRIPT monitor my-devbox [start] [end] [step]
 | Auth error (401) | Kubeconfig expired. Run `node scripts/sealos-auth.mjs login` to re-authenticate. |
 | Name conflict (409) | Suggest alternative name |
 | Invalid specs | Explain constraint, suggest valid value |
-| Creation timeout (>2 min) | Offer to keep polling or check console |
+| Creation timeout (>2 min) | Offer to keep polling, or direct user to the console URL from the response (`consoleUrl` field) |
 | Release 202 (async) | Explain it's building, suggest polling releases list |
+| Templates API failure | Show error, offer to retry or enter runtime manually (use api-reference.md runtime list as fallback) |
 | "namespace not found" (500) | Cluster admin kubeconfig; need Sealos user kubeconfig |
 
 ## Rules
