@@ -6,8 +6,7 @@
 //   node sealos-applaunchpad.mjs <command> [args...]
 //
 // Config resolution:
-//   1. API_URL env var (explicit override for non-standard setups)
-//   2. ~/.sealos/auth.json region field → derives API URL automatically
+//   ~/.sealos/auth.json region field → derives API URL automatically
 //   Kubeconfig is always read from ~/.sealos/kubeconfig
 //
 // Commands:
@@ -35,15 +34,7 @@ const API_PATH = '/api/v2alpha'; // API version — update here if the version c
 // --- config ---
 
 function loadConfig() {
-  // Priority 1: env var override (for non-standard setups)
-  if (process.env.API_URL) {
-    return {
-      apiUrl: process.env.API_URL,
-      kubeconfigPath: KC_PATH,
-    };
-  }
-
-  // Priority 2: derive from auth.json region
+  // Derive from auth.json region
   if (!existsSync(AUTH_PATH)) {
     throw new Error('Not authenticated. Run: node sealos-auth.mjs login');
   }

@@ -333,8 +333,7 @@ Zero external dependencies (Node.js only). TLS verification is disabled for self
 listed in the system environment's "Additional working directories" — use it directly.
 
 **Config resolution:** The script reads `~/.sealos/auth.json` (region) and `~/.sealos/kubeconfig`
-(credentials) — both created by `sealos-auth.mjs login`. Set `API_URL` env var to override
-for non-standard setups.
+(credentials) — both created by `sealos-auth.mjs login`.
 
 ```bash
 # Examples use SCRIPT as placeholder — replace with <SKILL_DIR>/scripts/sealos-applaunchpad.mjs
