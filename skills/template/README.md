@@ -24,7 +24,6 @@ Ask Claude Code in natural language, or run `/sealos-template`:
 > I need a search engine
 > Deploy this YAML file
 > Show template details for nocodb
-> Switch to my other cluster
 ```
 
 Claude walks you through browsing, configuration, and deployment interactively.
@@ -35,9 +34,8 @@ Claude walks you through browsing, configuration, and deployment interactively.
 - **Smart browsing** — templates sorted by popularity, grouped by category
 - **Guided deployment** — collects required args interactively, shows resource requirements
 - **Raw YAML deploy** — deploy custom templates from project files with dry-run preview
-- **Session memory** — remembers your auth and preferences across conversations
-- **Multi-cluster** — manage templates across multiple Sealos clusters via profiles
+- **OAuth2 login** — browser-based auth, no manual kubeconfig download needed
 
 ## Authentication
 
-Browsing templates is public — no authentication needed. On first deploy, Claude asks you to point to your Sealos kubeconfig file. Credentials are cached locally at `~/.config/sealos-template/config.json` and reused across sessions.
+Browsing templates is public — no authentication needed. On first deploy, Claude starts an OAuth2 browser login via `sealos-auth.mjs`. Credentials are saved to `~/.sealos/kubeconfig` and `~/.sealos/auth.json`, with the API URL auto-derived from the region.

@@ -5,88 +5,52 @@
 // Usage:
 //   node sealos-template.mjs <command> [args...]
 //
-// Config priority:
-//   1. KUBECONFIG_PATH + API_URL env vars (backwards compatible)
-//   2. ~/.config/sealos-template/config.json (from `init`)
-//   3. Error with hint to run `init`
+// Config resolution:
+//   ~/.sealos/auth.json  → region → derive API URL
+//   ~/.sealos/kubeconfig → credentials for auth-required operations
 //
 // Commands:
-//   init <kubeconfig_path> [api_url]  Parse kubeconfig, probe API URL, save config
 //   list [--language=en]              List all templates (no auth needed)
 //   get <name> [--language=en]        Get template details (no auth needed)
 //   create <json>                     Create a template instance (auth required)
 //   create-raw <json_or_filepath>     Deploy from raw YAML (auth required)
-//   profiles                          List all saved profiles
-//   use <profile>                     Switch active profile
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-const CONFIG_PATH = resolve(homedir(), '.config/sealos-template/config.json');
+const KC_PATH = resolve(homedir(), '.sealos/kubeconfig');
+const AUTH_PATH = resolve(homedir(), '.sealos/auth.json');
 const API_PATH = '/api/v2alpha'; // API version — update here if the version changes
 
-// --- config (multi-profile) ---
-
-function loadAllConfig() {
-  if (!existsSync(CONFIG_PATH)) return { active: null, profiles: {} };
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    // Migrate legacy flat format → profiles format
-    if (raw.apiUrl && !raw.profiles) {
-      return { active: 'default', profiles: { default: { kubeconfigPath: raw.kubeconfigPath, apiUrl: raw.apiUrl } } };
-    }
-    return raw;
-  } catch { return { active: null, profiles: {} }; }
-}
-
-function deriveProfileName(apiUrl) {
-  try {
-    const host = new URL(apiUrl).hostname;
-    const parts = host.split('.');
-    // template.gzg.sealos.io → gzg.sealos
-    if (parts[0] === 'template' && parts.length > 2) {
-      return parts.slice(1, -1).join('.');
-    }
-    return parts.slice(0, -1).join('.') || 'default';
-  } catch { return 'default'; }
-}
-
-function writeAllConfig(all) {
-  const dir = resolve(homedir(), '.config/sealos-template');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(all, null, 2) + '\n');
-}
+// --- config ---
 
 function loadConfig() {
-  // Priority 1: env vars
-  if (process.env.API_URL) {
-    return {
-      apiUrl: process.env.API_URL,
-      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.sealos/kubeconfig'),
-    };
+  if (!existsSync(AUTH_PATH)) {
+    throw new Error('Not authenticated. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 2: active profile from saved config
-  const all = loadAllConfig();
-  if (all.active && all.profiles[all.active]) {
-    const p = all.profiles[all.active];
-    if (p.apiUrl && p.kubeconfigPath) return p;
+  let auth;
+  try {
+    auth = JSON.parse(readFileSync(AUTH_PATH, 'utf-8'));
+  } catch {
+    throw new Error('Invalid auth.json. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 3: error
-  return null;
-}
+  if (!auth.region) {
+    throw new Error('No region in auth.json. Run: node sealos-auth.mjs login');
+  }
 
-function saveConfig(kubeconfigPath, apiUrl) {
-  const all = loadAllConfig();
-  const name = deriveProfileName(apiUrl);
-  all.profiles[name] = { kubeconfigPath, apiUrl };
-  all.active = name;
-  writeAllConfig(all);
-  return name;
+  const regionUrl = new URL(auth.region);
+  const apiUrl = `https://template.${regionUrl.hostname}${API_PATH}`;
+
+  if (!existsSync(KC_PATH)) {
+    throw new Error(`Kubeconfig not found at ${KC_PATH}. Run: node sealos-auth.mjs login`);
+  }
+
+  return { apiUrl, kubeconfigPath: KC_PATH };
 }
 
 // --- auth ---
@@ -143,64 +107,8 @@ function apiCall(method, endpoint, { apiUrl, auth, body, timeout = 30000 } = {})
 
 // --- helpers ---
 
-function requireConfig(allowNoConfig) {
-  const cfg = loadConfig();
-  if (!cfg && !allowNoConfig) {
-    throw new Error('No config found. Run: node sealos-template.mjs init <kubeconfig_path>');
-  }
-  return cfg;
-}
-
 function output(data) {
   console.log(JSON.stringify(data, null, 2));
-}
-
-// --- kubeconfig parsing ---
-
-function extractServerUrl(content) {
-  // Handles quoted and unquoted server URLs:
-  //   server: https://host:6443
-  //   server: "https://host:6443"
-  //   server: 'https://host:6443'
-  const match = content.match(/server:\s*['"]?(https?:\/\/[^\s'"]+)/);
-  return match ? match[1] : null;
-}
-
-function deriveApiCandidates(serverUrl) {
-  const urlObj = new URL(serverUrl);
-  const hostname = urlObj.hostname;
-  const parts = hostname.split('.');
-
-  const candidates = [];
-  const seen = new Set();
-  function add(url) {
-    if (!seen.has(url)) { seen.add(url); candidates.push(url); }
-  }
-
-  // 1. template.<full-hostname>
-  add(`https://template.${hostname}${API_PATH}`);
-
-  // 2. Strip first subdomain (e.g., apiserver.gzg.sealos.io → template.gzg.sealos.io)
-  if (parts.length > 2) {
-    add(`https://template.${parts.slice(1).join('.')}${API_PATH}`);
-  }
-
-  // 3. Strip first two subdomains (for deeper hierarchies)
-  if (parts.length > 3) {
-    add(`https://template.${parts.slice(2).join('.')}${API_PATH}`);
-  }
-
-  return candidates;
-}
-
-async function probeApiUrl(candidates) {
-  for (const apiUrl of candidates) {
-    try {
-      const res = await apiCall('GET', '/templates', { apiUrl, timeout: 5000 });
-      if (res.status === 200) return apiUrl;
-    } catch { /* try next candidate */ }
-  }
-  return null;
 }
 
 // --- parse CLI flags ---
@@ -246,21 +154,16 @@ function validateCreateRawBody(body) {
 // --- individual commands ---
 
 async function listTemplates(cfg, language) {
-  const apiUrl = cfg ? cfg.apiUrl : null;
-  if (!apiUrl) throw new Error('No config found. Provide API_URL env var or run: node sealos-template.mjs init <kubeconfig_path>');
   const langParam = language ? `?language=${encodeURIComponent(language)}` : '';
-  const res = await apiCall('GET', `/templates${langParam}`, { apiUrl });
+  const res = await apiCall('GET', `/templates${langParam}`, { apiUrl: cfg.apiUrl });
   if (res.status !== 200) throw new Error(`HTTP ${res.status}: ${JSON.stringify(res.body)}`);
-  // Include X-Menu-Keys header in result
   const menuKeys = res.headers['x-menu-keys'] || '';
   return { templates: res.body, menuKeys };
 }
 
 async function getTemplate(cfg, name, language) {
-  const apiUrl = cfg ? cfg.apiUrl : null;
-  if (!apiUrl) throw new Error('No config found. Provide API_URL env var or run: node sealos-template.mjs init <kubeconfig_path>');
   const langParam = language ? `?language=${encodeURIComponent(language)}` : '';
-  const res = await apiCall('GET', `/templates/${encodeURIComponent(name)}${langParam}`, { apiUrl });
+  const res = await apiCall('GET', `/templates/${encodeURIComponent(name)}${langParam}`, { apiUrl: cfg.apiUrl });
   if (res.status !== 200) throw new Error(`HTTP ${res.status}: ${JSON.stringify(res.body)}`);
   return res.body;
 }
@@ -277,7 +180,6 @@ async function createInstance(cfg, jsonBody) {
 async function createRaw(cfg, jsonOrFilepath) {
   let body;
   if (typeof jsonOrFilepath === 'string' && (jsonOrFilepath.startsWith('/') || jsonOrFilepath.startsWith('~'))) {
-    // Treat as file path — read JSON body from file
     const filePath = jsonOrFilepath.replace(/^~/, homedir());
     const absPath = resolve(filePath);
     if (!existsSync(absPath)) throw new Error(`File not found: ${absPath}`);
@@ -293,65 +195,6 @@ async function createRaw(cfg, jsonOrFilepath) {
   return res.body;
 }
 
-// --- batch commands ---
-
-async function init(kubeconfigPath, manualApiUrl) {
-  // 1. Resolve path
-  const kcPath = kubeconfigPath.replace(/^~/, homedir());
-  const absPath = resolve(kcPath);
-
-  if (!existsSync(absPath)) {
-    throw new Error(`Kubeconfig not found at ${absPath}`);
-  }
-
-  // 2. Parse kubeconfig
-  const kcContent = readFileSync(absPath, 'utf-8');
-  const serverUrl = extractServerUrl(kcContent);
-  if (!serverUrl) {
-    throw new Error('Could not find server URL in kubeconfig');
-  }
-
-  // 3. Resolve API URL — manual override or auto-probe
-  let apiUrl;
-  if (manualApiUrl) {
-    apiUrl = manualApiUrl.replace(/\/+$/, '');
-    if (!apiUrl.endsWith(API_PATH)) {
-      apiUrl += API_PATH;
-    }
-  } else {
-    const candidates = deriveApiCandidates(serverUrl);
-    apiUrl = await probeApiUrl(candidates);
-    if (!apiUrl) {
-      throw new Error(
-        `Could not auto-detect API URL from server: ${serverUrl}\n` +
-        `Tried: ${candidates.join(', ')}\n` +
-        `Specify manually: node sealos-template.mjs init ${kubeconfigPath} <api_url>\n` +
-        `Example: node sealos-template.mjs init ${kubeconfigPath} https://template.your-domain.com`
-      );
-    }
-  }
-
-  // 4. Save config (auto-derives profile name from domain)
-  const profileName = saveConfig(absPath, apiUrl);
-
-  // 5. Fetch templates to verify connection (public, no auth needed)
-  const cfg = { apiUrl, kubeconfigPath: absPath };
-  const { templates } = await listTemplates(cfg);
-
-  // 6. Test auth (optional — may fail if kubeconfig is expired, but that's ok for browsing)
-  let authValid = false;
-  try {
-    const auth = getEncodedKubeconfig(absPath);
-    // Try a lightweight auth-required call — create with invalid body to test auth
-    // Instead, just validate the kubeconfig can be read and encoded
-    authValid = !!auth;
-  } catch {
-    authValid = false;
-  }
-
-  return { apiUrl, kubeconfigPath: absPath, profileName, templateCount: templates.length, authValid };
-}
-
 // --- main ---
 
 async function main() {
@@ -359,29 +202,22 @@ async function main() {
 
   if (!cmd) {
     console.error('ERROR: Command required.');
-    console.error('Commands: init|list|get|create|create-raw|profiles|use');
+    console.error('Commands: list|get|create|create-raw');
     process.exit(1);
   }
 
   try {
+    const cfg = loadConfig();
     let result;
 
     switch (cmd) {
-      case 'init': {
-        if (!args[0]) throw new Error('Usage: node sealos-template.mjs init <kubeconfig_path> [api_url]');
-        result = await init(args[0], args[1]);
-        break;
-      }
-
       case 'list': {
-        const cfg = requireConfig(false);
         const { flags } = parseFlags(args);
         result = await listTemplates(cfg, flags.language || 'en');
         break;
       }
 
       case 'get': {
-        const cfg = requireConfig(false);
         const { flags, positional } = parseFlags(args);
         if (!positional[0]) throw new Error('Template name required');
         result = await getTemplate(cfg, positional[0], flags.language || 'en');
@@ -389,49 +225,19 @@ async function main() {
       }
 
       case 'create': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body required');
         result = await createInstance(cfg, args[0]);
         break;
       }
 
       case 'create-raw': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body or file path required');
         result = await createRaw(cfg, args[0]);
         break;
       }
 
-      case 'profiles': {
-        const all = loadAllConfig();
-        result = {
-          active: all.active,
-          profiles: Object.entries(all.profiles).map(([name, cfg]) => ({
-            name,
-            apiUrl: cfg.apiUrl,
-            kubeconfigPath: cfg.kubeconfigPath,
-            active: name === all.active,
-          })),
-        };
-        break;
-      }
-
-      case 'use': {
-        if (!args[0]) throw new Error('Profile name required');
-        const name = args[0];
-        const all = loadAllConfig();
-        if (!all.profiles[name]) {
-          const available = Object.keys(all.profiles).join(', ');
-          throw new Error(`Profile '${name}' not found. Available: ${available || '(none)'}`);
-        }
-        all.active = name;
-        writeAllConfig(all);
-        result = { active: name, ...all.profiles[name] };
-        break;
-      }
-
       default:
-        throw new Error(`Unknown command '${cmd}'. Commands: init|list|get|create|create-raw|profiles|use`);
+        throw new Error(`Unknown command '${cmd}'. Commands: list|get|create|create-raw`);
     }
 
     if (result !== undefined) output(result);
