@@ -12,6 +12,11 @@ to the user as "tiers" — the user sees individual CPU/Memory/Storage/Replicas 
 | Production | 2 | 4 GB | 20 GB | 3 | "prod", "production", "HA", "high availability" |
 | Custom | — | — | — | — | specific numbers like "4 cores, 8g memory" |
 
+> **Why Default has 3 replicas but Medium has 1:** Default is the safe fallback when
+> intent is unclear — 3 replicas ensure the user doesn't accidentally create a
+> single-point-of-failure. Medium is for users who explicitly said "small/starter",
+> signaling they accept fewer replicas for lower cost.
+
 ## Type Recommendation Rules
 
 Match project tech stack to a recommended database type.
@@ -57,7 +62,9 @@ Database config:
 
 **Hard limit: max 4 options per `AskUserQuestion` call.** The tool auto-appends implicit
 options ("Type something", "Chat about this") which consume slots. More than 4 user-provided
-options will be truncated and invisible to the user.
+options will be truncated and invisible to the user. This limit applies regardless of
+whether `multiSelect` is enabled — `multiSelect: true` allows choosing multiple from the
+same max-4 option list.
 
 When building options for `AskUserQuestion`:
 - **Name options**: generate 2-3 name suggestions from project dir + type. If a name

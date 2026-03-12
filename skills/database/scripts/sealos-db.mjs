@@ -5,13 +5,11 @@
 // Usage:
 //   node sealos-db.mjs <command> [args...]
 //
-// Config priority:
-//   1. KUBECONFIG_PATH + API_URL env vars (backwards compatible)
-//   2. ~/.config/sealos-db/config.json (from `init`)
-//   3. Error with hint to run `init`
+// Config resolution:
+//   ~/.sealos/auth.json region field → derives API URL automatically
+//   Kubeconfig is always read from ~/.sealos/kubeconfig
 //
 // Commands:
-//   init <kubeconfig_path> [api_url]  Parse kubeconfig, probe API URL, save config
 //   list-versions                    List available database versions (no auth needed)
 //   list                             List all databases
 //   get <name>                       Get database details and connection info
@@ -30,77 +28,45 @@
 //   restore-backup <name> <backup> [json]  Restore from backup (optional: {"name":"...","replicas":N})
 //   log-files <name> <dbType> <logType>    List log files for a database pod
 //   logs <name> <dbType> <logType> <logPath> [page] [pageSize]  Get log entries
-//   profiles                         List all saved profiles
-//   use <profile>                    Switch active profile
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-const CONFIG_PATH = resolve(homedir(), '.config/sealos-db/config.json');
+const KC_PATH = resolve(homedir(), '.sealos/kubeconfig');
+const AUTH_PATH = resolve(homedir(), '.sealos/auth.json');
 const API_PATH = '/api/v2alpha'; // API version — update here if the version changes
 
-// --- config (multi-profile) ---
-
-function loadAllConfig() {
-  if (!existsSync(CONFIG_PATH)) return { active: null, profiles: {} };
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    // Migrate legacy flat format → profiles format
-    if (raw.apiUrl && !raw.profiles) {
-      return { active: 'default', profiles: { default: { kubeconfigPath: raw.kubeconfigPath, apiUrl: raw.apiUrl } } };
-    }
-    return raw;
-  } catch { return { active: null, profiles: {} }; }
-}
-
-function deriveProfileName(apiUrl) {
-  try {
-    const host = new URL(apiUrl).hostname;
-    const parts = host.split('.');
-    // dbprovider.gzg.sealos.io → gzg.sealos
-    if (parts[0] === 'dbprovider' && parts.length > 2) {
-      return parts.slice(1, -1).join('.');
-    }
-    return parts.slice(0, -1).join('.') || 'default';
-  } catch { return 'default'; }
-}
-
-function writeAllConfig(all) {
-  const dir = resolve(homedir(), '.config/sealos-db');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(all, null, 2) + '\n');
-}
+// --- config ---
 
 function loadConfig() {
-  // Priority 1: env vars
-  if (process.env.API_URL) {
-    return {
-      apiUrl: process.env.API_URL,
-      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.sealos/kubeconfig'),
-    };
+  // Derive API URL from auth.json region
+  if (!existsSync(AUTH_PATH)) {
+    throw new Error('Not authenticated. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 2: active profile from saved config
-  const all = loadAllConfig();
-  if (all.active && all.profiles[all.active]) {
-    const p = all.profiles[all.active];
-    if (p.apiUrl && p.kubeconfigPath) return p;
+  let auth;
+  try {
+    auth = JSON.parse(readFileSync(AUTH_PATH, 'utf-8'));
+  } catch {
+    throw new Error('Invalid auth.json. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 3: error
-  return null;
-}
+  if (!auth.region) {
+    throw new Error('No region in auth.json. Run: node sealos-auth.mjs login');
+  }
 
-function saveConfig(kubeconfigPath, apiUrl) {
-  const all = loadAllConfig();
-  const name = deriveProfileName(apiUrl);
-  all.profiles[name] = { kubeconfigPath, apiUrl };
-  all.active = name;
-  writeAllConfig(all);
-  return name;
+  // Derive API URL: region "https://gzg.sealos.run" → "https://dbprovider.gzg.sealos.run/api/v2alpha"
+  const regionUrl = new URL(auth.region);
+  const apiUrl = `https://dbprovider.${regionUrl.hostname}${API_PATH}`;
+
+  if (!existsSync(KC_PATH)) {
+    throw new Error(`Kubeconfig not found at ${KC_PATH}. Run: node sealos-auth.mjs login`);
+  }
+
+  return { apiUrl, kubeconfigPath: KC_PATH };
 }
 
 // --- auth ---
@@ -157,14 +123,6 @@ function apiCall(method, endpoint, { apiUrl, auth, body, timeout = 30000 } = {})
 
 // --- helpers ---
 
-function requireConfig(allowNoConfig) {
-  const cfg = loadConfig();
-  if (!cfg && !allowNoConfig) {
-    throw new Error('No config found. Run: node sealos-db.mjs init <kubeconfig_path>');
-  }
-  return cfg;
-}
-
 function requireName(args) {
   if (!args[0]) throw new Error('Database name required');
   return args[0];
@@ -178,59 +136,9 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// --- kubeconfig parsing ---
-
-function extractServerUrl(content) {
-  // Handles quoted and unquoted server URLs:
-  //   server: https://host:6443
-  //   server: "https://host:6443"
-  //   server: 'https://host:6443'
-  const match = content.match(/server:\s*['"]?(https?:\/\/[^\s'"]+)/);
-  return match ? match[1] : null;
-}
-
-function deriveApiCandidates(serverUrl) {
-  const urlObj = new URL(serverUrl);
-  const hostname = urlObj.hostname;
-  const parts = hostname.split('.');
-
-  const candidates = [];
-  const seen = new Set();
-  function add(url) {
-    if (!seen.has(url)) { seen.add(url); candidates.push(url); }
-  }
-
-  // 1. dbprovider.<full-hostname>
-  add(`https://dbprovider.${hostname}${API_PATH}`);
-
-  // 2. Strip first subdomain (e.g., apiserver.gzg.sealos.io → dbprovider.gzg.sealos.io)
-  if (parts.length > 2) {
-    add(`https://dbprovider.${parts.slice(1).join('.')}${API_PATH}`);
-  }
-
-  // 3. Strip first two subdomains (for deeper hierarchies)
-  if (parts.length > 3) {
-    add(`https://dbprovider.${parts.slice(2).join('.')}${API_PATH}`);
-  }
-
-  return candidates;
-}
-
-async function probeApiUrl(candidates) {
-  for (const apiUrl of candidates) {
-    try {
-      const res = await apiCall('GET', '/databases/versions', { apiUrl, timeout: 5000 });
-      if (res.status === 200) return apiUrl;
-    } catch { /* try next candidate */ }
-  }
-  return null;
-}
-
 // --- individual commands ---
 
 async function listVersions(cfg) {
-  // list-versions needs API_URL but no auth
-  if (!cfg) throw new Error('No config found. Provide API_URL env var or run: node sealos-db.mjs init <kubeconfig_path>');
   const res = await apiCall('GET', '/databases/versions', { apiUrl: cfg.apiUrl });
   if (res.status !== 200) throw new Error(`HTTP ${res.status}: ${JSON.stringify(res.body)}`);
   return res.body;
@@ -387,60 +295,6 @@ async function getLogs(cfg, podName, dbType, logType, logPath, page, pageSize) {
 
 // --- batch commands ---
 
-async function init(kubeconfigPath, manualApiUrl) {
-  // 1. Resolve path
-  const kcPath = kubeconfigPath.replace(/^~/, homedir());
-  const absPath = resolve(kcPath);
-
-  if (!existsSync(absPath)) {
-    throw new Error(`Kubeconfig not found at ${absPath}`);
-  }
-
-  // 2. Parse kubeconfig
-  const kcContent = readFileSync(absPath, 'utf-8');
-  const serverUrl = extractServerUrl(kcContent);
-  if (!serverUrl) {
-    throw new Error('Could not find server URL in kubeconfig');
-  }
-
-  // 3. Resolve API URL — manual override or auto-probe
-  let apiUrl;
-  if (manualApiUrl) {
-    apiUrl = manualApiUrl.replace(/\/+$/, '');
-    if (!apiUrl.endsWith(API_PATH)) {
-      apiUrl += API_PATH;
-    }
-  } else {
-    const candidates = deriveApiCandidates(serverUrl);
-    apiUrl = await probeApiUrl(candidates);
-    if (!apiUrl) {
-      throw new Error(
-        `Could not auto-detect API URL from server: ${serverUrl}\n` +
-        `Tried: ${candidates.join(', ')}\n` +
-        `Specify manually: node sealos-db.mjs init ${kubeconfigPath} <api_url>\n` +
-        `Example: node sealos-db.mjs init ${kubeconfigPath} https://dbprovider.your-domain.com`
-      );
-    }
-  }
-
-  // 4. Save config (auto-derives profile name from domain)
-  const profileName = saveConfig(absPath, apiUrl);
-
-  // 5. Fetch versions and databases
-  const cfg = { apiUrl, kubeconfigPath: absPath };
-  const versions = await listVersions(cfg);
-
-  let databases = [];
-  try {
-    databases = await list(cfg);
-  } catch (e) {
-    // Auth might fail but versions worked — return partial result
-    return { apiUrl, kubeconfigPath: absPath, profileName, versions, databases: null, authError: e.message };
-  }
-
-  return { apiUrl, kubeconfigPath: absPath, profileName, versions, databases };
-}
-
 async function createWait(cfg, jsonBody) {
   // 1. Create
   const body = typeof jsonBody === 'string' ? JSON.parse(jsonBody) : jsonBody;
@@ -489,55 +343,44 @@ async function main() {
 
   if (!cmd) {
     console.error('ERROR: Command required.');
-    console.error('Commands: init|list-versions|list|get|create|create-wait|update|delete|start|pause|restart|enable-public|disable-public|list-backups|create-backup|delete-backup|restore-backup|log-files|logs|profiles|use');
+    console.error('Commands: list-versions|list|get|create|create-wait|update|delete|start|pause|restart|enable-public|disable-public|list-backups|create-backup|delete-backup|restore-backup|log-files|logs');
     process.exit(1);
   }
 
   try {
+    const cfg = loadConfig();
     let result;
 
     switch (cmd) {
-      case 'init': {
-        if (!args[0]) throw new Error('Usage: node sealos-db.mjs init <kubeconfig_path> [api_url]');
-        result = await init(args[0], args[1]);
-        break;
-      }
-
       case 'list-versions': {
-        const cfg = requireConfig(false);
         result = await listVersions(cfg);
         break;
       }
 
       case 'list': {
-        const cfg = requireConfig(false);
         result = await list(cfg);
         break;
       }
 
       case 'get': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await get(cfg, name);
         break;
       }
 
       case 'create': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body required');
         result = await create(cfg, args[0]);
         break;
       }
 
       case 'create-wait': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body required');
         result = await createWait(cfg, args[0]);
         break;
       }
 
       case 'update': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('JSON body required');
         result = await update(cfg, name, args[1]);
@@ -545,7 +388,6 @@ async function main() {
       }
 
       case 'delete': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await del(cfg, name);
         break;
@@ -556,28 +398,24 @@ async function main() {
       case 'restart':
       case 'enable-public':
       case 'disable-public': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await action(cfg, name, cmd);
         break;
       }
 
       case 'list-backups': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await listBackups(cfg, name);
         break;
       }
 
       case 'create-backup': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await createBackup(cfg, name, args[1]);
         break;
       }
 
       case 'delete-backup': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('Backup name required');
         result = await deleteBackup(cfg, name, args[1]);
@@ -585,7 +423,6 @@ async function main() {
       }
 
       case 'restore-backup': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('Backup name required');
         result = await restoreBackup(cfg, name, args[1], args[2]);
@@ -593,7 +430,6 @@ async function main() {
       }
 
       case 'log-files': {
-        const cfg = requireConfig(false);
         const podName = requireName(args);
         if (!args[1]) throw new Error('dbType required (mysql|mongodb|redis|postgresql)');
         if (!args[2]) throw new Error('logType required (runtimeLog|slowQuery|errorLog)');
@@ -602,7 +438,6 @@ async function main() {
       }
 
       case 'logs': {
-        const cfg = requireConfig(false);
         const podName = requireName(args);
         if (!args[1]) throw new Error('dbType required (mysql|mongodb|redis|postgresql)');
         if (!args[2]) throw new Error('logType required (runtimeLog|slowQuery|errorLog)');
@@ -611,35 +446,8 @@ async function main() {
         break;
       }
 
-      case 'profiles': {
-        const all = loadAllConfig();
-        result = {
-          active: all.active,
-          profiles: Object.entries(all.profiles).map(([name, cfg]) => ({
-            name,
-            apiUrl: cfg.apiUrl,
-            kubeconfigPath: cfg.kubeconfigPath,
-            active: name === all.active,
-          })),
-        };
-        break;
-      }
-
-      case 'use': {
-        const name = requireName(args);
-        const all = loadAllConfig();
-        if (!all.profiles[name]) {
-          const available = Object.keys(all.profiles).join(', ');
-          throw new Error(`Profile '${name}' not found. Available: ${available || '(none)'}`);
-        }
-        all.active = name;
-        writeAllConfig(all);
-        result = { active: name, ...all.profiles[name] };
-        break;
-      }
-
       default:
-        throw new Error(`Unknown command '${cmd}'. Commands: init|list-versions|list|get|create|create-wait|update|delete|start|pause|restart|enable-public|disable-public|list-backups|create-backup|delete-backup|restore-backup|log-files|logs|profiles|use`);
+        throw new Error(`Unknown command '${cmd}'. Commands: list-versions|list|get|create|create-wait|update|delete|start|pause|restart|enable-public|disable-public|list-backups|create-backup|delete-backup|restore-backup|log-files|logs`);
     }
 
     if (result !== undefined) output(result);

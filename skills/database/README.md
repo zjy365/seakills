@@ -35,9 +35,8 @@ Claude walks you through authentication, configuration, and execution interactiv
 - **Full lifecycle** — create, list, inspect, update, delete, start, stop, restart
 - **Public access control** — expose or hide databases from the internet
 - **Project integration** — writes connection info to `.env`, `docker-compose.yml`, or framework config
-- **Session memory** — remembers your auth and preferences across conversations
 - **Safe deletes** — requires explicit name confirmation before destroying anything
 
 ## Authentication
 
-On first use, Claude asks you to point to your Sealos kubeconfig file. Credentials are cached locally at `~/.config/sealos-db/config.json` and reused across sessions.
+On first use, Claude opens your browser for OAuth2 login. Credentials are saved to `~/.sealos/kubeconfig` and the API URL is auto-derived from `~/.sealos/auth.json`.

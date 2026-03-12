@@ -83,6 +83,8 @@ Response: `201 Created` -> `{ "name": "my-db", "status": "creating" }`
 Response: `200 OK` -> Array of `{ name, uid, type, version, status, quota }`
 
 Status values: `Running`, `Stopped`, `Creating`, `Updating`, `Failed`, `Deleting`
+> **Note:** List returns capitalized statuses (`Running`), Get returns lowercase (`running`).
+> Always compare case-insensitively (e.g., `.toLowerCase() === 'running'`).
 
 ### GET /databases/{name} -- Get Details
 
