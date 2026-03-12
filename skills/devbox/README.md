@@ -39,9 +39,8 @@ Claude walks you through authentication, configuration, and execution interactiv
 - **Port management** — add, remove, and toggle public access for ports
 - **Release & deploy** — create versioned releases and deploy to AppLaunchpad
 - **Resource monitoring** — view CPU and memory usage metrics over time
-- **Session memory** — remembers your auth and preferences across conversations
 - **Safe deletes** — requires explicit name confirmation before destroying anything
 
 ## Authentication
 
-On first use, Claude asks you to point to your Sealos kubeconfig file. Credentials are cached locally at `~/.config/sealos-devbox/config.json` and reused across sessions.
+On first use, Claude opens your browser for OAuth2 login. Credentials are saved to `~/.sealos/kubeconfig` and the API URL is auto-derived from `~/.sealos/auth.json`.

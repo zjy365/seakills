@@ -5,13 +5,11 @@
 // Usage:
 //   node sealos-devbox.mjs <command> [args...]
 //
-// Config priority:
-//   1. KUBECONFIG_PATH + API_URL env vars (backwards compatible)
-//   2. ~/.config/sealos-devbox/config.json (from `init`)
-//   3. Error with hint to run `init`
+// Config resolution:
+//   ~/.sealos/auth.json region field → derives API URL automatically
+//   Kubeconfig is always read from ~/.sealos/kubeconfig
 //
 // Commands:
-//   init <kubeconfig_path> [api_url]  Parse kubeconfig, probe API URL, save config
 //   templates                         List available runtimes (no auth needed)
 //   list                              List all devboxes
 //   get <name>                        Get devbox details + SSH info
@@ -30,8 +28,6 @@
 //   deploy <name> <tag>               Deploy release to AppLaunchpad
 //   list-deployments <name>           List deployments
 //   monitor <name> [start] [end] [step]  Get CPU/memory metrics
-//   profiles                          List saved profiles
-//   use <profile>                     Switch active profile
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
@@ -39,69 +35,39 @@ import { request as httpRequest } from 'node:http';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-const CONFIG_PATH = resolve(homedir(), '.config/sealos-devbox/config.json');
+const KC_PATH = resolve(homedir(), '.sealos/kubeconfig');
+const AUTH_PATH = resolve(homedir(), '.sealos/auth.json');
 const KEYS_DIR = resolve(homedir(), '.config/sealos-devbox/keys');
 const API_PATH = '/api/v2alpha'; // API version — update here if the version changes
 
-// --- config (multi-profile) ---
-
-function loadAllConfig() {
-  if (!existsSync(CONFIG_PATH)) return { active: null, profiles: {} };
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    // Migrate legacy flat format → profiles format
-    if (raw.apiUrl && !raw.profiles) {
-      return { active: 'default', profiles: { default: { kubeconfigPath: raw.kubeconfigPath, apiUrl: raw.apiUrl } } };
-    }
-    return raw;
-  } catch { return { active: null, profiles: {} }; }
-}
-
-function deriveProfileName(apiUrl) {
-  try {
-    const host = new URL(apiUrl).hostname;
-    const parts = host.split('.');
-    // devbox.gzg.sealos.io → gzg.sealos
-    if (parts[0] === 'devbox' && parts.length > 2) {
-      return parts.slice(1, -1).join('.');
-    }
-    return parts.slice(0, -1).join('.') || 'default';
-  } catch { return 'default'; }
-}
-
-function writeAllConfig(all) {
-  const dir = resolve(homedir(), '.config/sealos-devbox');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(all, null, 2) + '\n');
-}
+// --- config ---
 
 function loadConfig() {
-  // Priority 1: env vars
-  if (process.env.API_URL) {
-    return {
-      apiUrl: process.env.API_URL,
-      kubeconfigPath: process.env.KUBECONFIG_PATH || resolve(homedir(), '.sealos/kubeconfig'),
-    };
+  // Derive API URL from auth.json region
+  if (!existsSync(AUTH_PATH)) {
+    throw new Error('Not authenticated. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 2: active profile from saved config
-  const all = loadAllConfig();
-  if (all.active && all.profiles[all.active]) {
-    const p = all.profiles[all.active];
-    if (p.apiUrl && p.kubeconfigPath) return p;
+  let auth;
+  try {
+    auth = JSON.parse(readFileSync(AUTH_PATH, 'utf-8'));
+  } catch {
+    throw new Error('Invalid auth.json. Run: node sealos-auth.mjs login');
   }
 
-  // Priority 3: error
-  return null;
-}
+  if (!auth.region) {
+    throw new Error('No region in auth.json. Run: node sealos-auth.mjs login');
+  }
 
-function saveConfig(kubeconfigPath, apiUrl) {
-  const all = loadAllConfig();
-  const name = deriveProfileName(apiUrl);
-  all.profiles[name] = { kubeconfigPath, apiUrl };
-  all.active = name;
-  writeAllConfig(all);
-  return name;
+  // Derive API URL: region "https://gzg.sealos.run" → "https://devbox.gzg.sealos.run/api/v2alpha"
+  const regionUrl = new URL(auth.region);
+  const apiUrl = `https://devbox.${regionUrl.hostname}${API_PATH}`;
+
+  if (!existsSync(KC_PATH)) {
+    throw new Error(`Kubeconfig not found at ${KC_PATH}. Run: node sealos-auth.mjs login`);
+  }
+
+  return { apiUrl, kubeconfigPath: KC_PATH };
 }
 
 // --- SSH key management ---
@@ -169,14 +135,6 @@ function apiCall(method, endpoint, { apiUrl, auth, body, timeout = 30000 } = {})
 
 // --- helpers ---
 
-function requireConfig(allowNoConfig) {
-  const cfg = loadConfig();
-  if (!cfg && !allowNoConfig) {
-    throw new Error('No config found. Run: node sealos-devbox.mjs init <kubeconfig_path>');
-  }
-  return cfg;
-}
-
 function requireName(args) {
   if (!args[0]) throw new Error('Devbox name required');
   return args[0];
@@ -190,59 +148,9 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// --- kubeconfig parsing ---
-
-function extractServerUrl(content) {
-  // Handles quoted and unquoted server URLs:
-  //   server: https://host:6443
-  //   server: "https://host:6443"
-  //   server: 'https://host:6443'
-  const match = content.match(/server:\s*['"]?(https?:\/\/[^\s'"]+)/);
-  return match ? match[1] : null;
-}
-
-function deriveApiCandidates(serverUrl) {
-  const urlObj = new URL(serverUrl);
-  const hostname = urlObj.hostname;
-  const parts = hostname.split('.');
-
-  const candidates = [];
-  const seen = new Set();
-  function add(url) {
-    if (!seen.has(url)) { seen.add(url); candidates.push(url); }
-  }
-
-  // 1. devbox.<full-hostname>
-  add(`https://devbox.${hostname}${API_PATH}`);
-
-  // 2. Strip first subdomain (e.g., apiserver.gzg.sealos.io → devbox.gzg.sealos.io)
-  if (parts.length > 2) {
-    add(`https://devbox.${parts.slice(1).join('.')}${API_PATH}`);
-  }
-
-  // 3. Strip first two subdomains (for deeper hierarchies)
-  if (parts.length > 3) {
-    add(`https://devbox.${parts.slice(2).join('.')}${API_PATH}`);
-  }
-
-  return candidates;
-}
-
-async function probeApiUrl(candidates) {
-  for (const apiUrl of candidates) {
-    try {
-      const res = await apiCall('GET', '/devbox/templates', { apiUrl, timeout: 5000 });
-      if (res.status === 200) return apiUrl;
-    } catch { /* try next candidate */ }
-  }
-  return null;
-}
-
 // --- individual commands ---
 
 async function listTemplates(cfg) {
-  // templates needs API_URL but no auth
-  if (!cfg) throw new Error('No config found. Provide API_URL env var or run: node sealos-devbox.mjs init <kubeconfig_path>');
   const res = await apiCall('GET', '/devbox/templates', { apiUrl: cfg.apiUrl });
   if (res.status !== 200) throw new Error(`HTTP ${res.status}: ${JSON.stringify(res.body)}`);
   return res.body;
@@ -423,60 +331,6 @@ async function monitor(cfg, name, start, end, step) {
 
 // --- batch commands ---
 
-async function init(kubeconfigPath, manualApiUrl) {
-  // 1. Resolve path
-  const kcPath = kubeconfigPath.replace(/^~/, homedir());
-  const absPath = resolve(kcPath);
-
-  if (!existsSync(absPath)) {
-    throw new Error(`Kubeconfig not found at ${absPath}`);
-  }
-
-  // 2. Parse kubeconfig
-  const kcContent = readFileSync(absPath, 'utf-8');
-  const serverUrl = extractServerUrl(kcContent);
-  if (!serverUrl) {
-    throw new Error('Could not find server URL in kubeconfig');
-  }
-
-  // 3. Resolve API URL — manual override or auto-probe
-  let apiUrl;
-  if (manualApiUrl) {
-    apiUrl = manualApiUrl.replace(/\/+$/, '');
-    if (!apiUrl.endsWith(API_PATH)) {
-      apiUrl += API_PATH;
-    }
-  } else {
-    const candidates = deriveApiCandidates(serverUrl);
-    apiUrl = await probeApiUrl(candidates);
-    if (!apiUrl) {
-      throw new Error(
-        `Could not auto-detect API URL from server: ${serverUrl}\n` +
-        `Tried: ${candidates.join(', ')}\n` +
-        `Specify manually: node sealos-devbox.mjs init ${kubeconfigPath} <api_url>\n` +
-        `Example: node sealos-devbox.mjs init ${kubeconfigPath} https://devbox.your-domain.com`
-      );
-    }
-  }
-
-  // 4. Save config (auto-derives profile name from domain)
-  const profileName = saveConfig(absPath, apiUrl);
-
-  // 5. Fetch templates and devboxes
-  const cfg = { apiUrl, kubeconfigPath: absPath };
-  const templates = await listTemplates(cfg);
-
-  let devboxes = [];
-  try {
-    devboxes = await list(cfg);
-  } catch (e) {
-    // Auth might fail but templates worked — return partial result
-    return { apiUrl, kubeconfigPath: absPath, profileName, templates, devboxes: null, authError: e.message };
-  }
-
-  return { apiUrl, kubeconfigPath: absPath, profileName, templates, devboxes };
-}
-
 async function createWait(cfg, jsonBody) {
   // 1. Create
   const body = typeof jsonBody === 'string' ? JSON.parse(jsonBody) : jsonBody;
@@ -529,55 +383,44 @@ async function main() {
 
   if (!cmd) {
     console.error('ERROR: Command required.');
-    console.error('Commands: init|templates|list|get|create|create-wait|update|delete|start|pause|shutdown|restart|autostart|list-releases|create-release|delete-release|deploy|list-deployments|monitor|profiles|use');
+    console.error('Commands: templates|list|get|create|create-wait|update|delete|start|pause|shutdown|restart|autostart|list-releases|create-release|delete-release|deploy|list-deployments|monitor');
     process.exit(1);
   }
 
   try {
+    const cfg = loadConfig();
     let result;
 
     switch (cmd) {
-      case 'init': {
-        if (!args[0]) throw new Error('Usage: node sealos-devbox.mjs init <kubeconfig_path> [api_url]');
-        result = await init(args[0], args[1]);
-        break;
-      }
-
       case 'templates': {
-        const cfg = requireConfig(false);
         result = await listTemplates(cfg);
         break;
       }
 
       case 'list': {
-        const cfg = requireConfig(false);
         result = await list(cfg);
         break;
       }
 
       case 'get': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await get(cfg, name);
         break;
       }
 
       case 'create': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body required');
         result = await create(cfg, args[0]);
         break;
       }
 
       case 'create-wait': {
-        const cfg = requireConfig(false);
         if (!args[0]) throw new Error('JSON body required');
         result = await createWait(cfg, args[0]);
         break;
       }
 
       case 'update': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('JSON body required');
         result = await update(cfg, name, args[1]);
@@ -585,7 +428,6 @@ async function main() {
       }
 
       case 'delete': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await del(cfg, name);
         break;
@@ -595,28 +437,24 @@ async function main() {
       case 'pause':
       case 'shutdown':
       case 'restart': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await action(cfg, name, cmd);
         break;
       }
 
       case 'autostart': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await autostart(cfg, name, args[1]);
         break;
       }
 
       case 'list-releases': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await listReleases(cfg, name);
         break;
       }
 
       case 'create-release': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('JSON body required');
         result = await createRelease(cfg, name, args[1]);
@@ -624,7 +462,6 @@ async function main() {
       }
 
       case 'delete-release': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('Release tag required');
         result = await deleteRelease(cfg, name, args[1]);
@@ -632,7 +469,6 @@ async function main() {
       }
 
       case 'deploy': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         if (!args[1]) throw new Error('Release tag required');
         result = await deploy(cfg, name, args[1]);
@@ -640,48 +476,19 @@ async function main() {
       }
 
       case 'list-deployments': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await listDeployments(cfg, name);
         break;
       }
 
       case 'monitor': {
-        const cfg = requireConfig(false);
         const name = requireName(args);
         result = await monitor(cfg, name, args[1], args[2], args[3]);
         break;
       }
 
-      case 'profiles': {
-        const all = loadAllConfig();
-        result = {
-          active: all.active,
-          profiles: Object.entries(all.profiles).map(([name, cfg]) => ({
-            name,
-            apiUrl: cfg.apiUrl,
-            kubeconfigPath: cfg.kubeconfigPath,
-            active: name === all.active,
-          })),
-        };
-        break;
-      }
-
-      case 'use': {
-        const name = requireName(args);
-        const all = loadAllConfig();
-        if (!all.profiles[name]) {
-          const available = Object.keys(all.profiles).join(', ');
-          throw new Error(`Profile '${name}' not found. Available: ${available || '(none)'}`);
-        }
-        all.active = name;
-        writeAllConfig(all);
-        result = { active: name, ...all.profiles[name] };
-        break;
-      }
-
       default:
-        throw new Error(`Unknown command '${cmd}'. Commands: init|templates|list|get|create|create-wait|update|delete|start|pause|shutdown|restart|autostart|list-releases|create-release|delete-release|deploy|list-deployments|monitor|profiles|use`);
+        throw new Error(`Unknown command '${cmd}'. Commands: templates|list|get|create|create-wait|update|delete|start|pause|shutdown|restart|autostart|list-releases|create-release|delete-release|deploy|list-deployments|monitor`);
     }
 
     if (result !== undefined) output(result);

@@ -9,84 +9,62 @@ description: >-
   "pause the devbox", "create a release", or "my app needs a dev environment".
 ---
 
-## Interaction Principle — MANDATORY
+## Interaction Principle
 
-**NEVER output a question as plain text. ALWAYS use `AskUserQuestion` with an `options` array.**
+**NEVER output a question as plain text. ALWAYS use `AskUserQuestion` with `options`.**
 
-This is a hard rule with zero exceptions:
-- Every time you need user input → call `AskUserQuestion` with `options`
-- Do NOT write a question as text output and wait — the user MUST see clickable options
-- Do NOT output explanatory prose and then ask a question as text — call `AskUserQuestion` instead
-- Keep text output before `AskUserQuestion` to one short sentence max (status update only)
+Claude Code's text output is non-interactive — if you write a question as plain text, the
+user has no clickable options and must guess how to respond. `AskUserQuestion` gives them
+clear choices they can click.
 
-**BAD** (never do this):
-```
-Please save your Sealos kubeconfig to a file and tell me the path.
-Download from Sealos Console > Settings > Kubeconfig...
-```
-
-**GOOD** (always do this):
-```
-AskUserQuestion(header="Kubeconfig", question="Where is your Sealos kubeconfig?", options=[...])
-```
-
-`AskUserQuestion` always adds an implicit "Other / Type something" option automatically,
-so the user can still type custom input when none of the options fit.
-
-**Free-text matching:** When the user types free text instead of clicking an option,
-match it to the closest option by intent. Examples:
-- "show all runtimes", "all runtimes" → treat as "Show all runtimes"
-- "node", "nodejs" → treat as the Node.js option
-- "py", "python3" → treat as the Python option
-- "next" → treat as the Next.js option
-
-Never re-ask the same question because the wording didn't match exactly.
+- Every question → `AskUserQuestion` with `options`. Keep any preceding text to one short status line.
+- `AskUserQuestion` adds an implicit "Other / Type something" option, so users can always type custom input.
+- **Free-text matching:** When the user types instead of clicking, match to the closest option by intent.
+  "node", "nodejs" → Node.js; "py", "python3" → Python; "next" → Next.js.
+  Never re-ask because wording didn't match exactly.
 
 ## Fixed Execution Order
 
 **ALWAYS follow these steps in this exact order. No skipping, no reordering.**
 
 ```
-Step 0: Check Memory       (try to restore auth from previous session)
-Step 1: Authenticate        (only if Step 0 has no valid memory)
+Step 0: Check Auth         (try existing config from previous session)
+Step 1: Authenticate        (only if Step 0 fails)
 Step 2: Route               (determine which operation the user wants)
 Step 3: Execute operation   (follow the operation-specific steps below)
-Step 4: Update Memory       (save state for next session)
 ```
 
 ---
 
-## Step 0: Check Memory
+## Step 0: Check Auth
 
-Check for memory file `sealos-devbox.md` in the project's auto memory directory.
+The script auto-derives its API URL from `~/.sealos/auth.json` (saved by login)
+and reads credentials from `~/.sealos/kubeconfig`. No separate config file needed.
 
-**If memory file exists and contains `kubeconfig_path` + `api_url`:**
-1. Verify the kubeconfig file still exists at the saved path
-2. Run `node scripts/sealos-devbox.mjs list` to test auth
-3. If works → skip Step 1. Greet with context.
-4. If fails (401, file missing) → proceed to Step 1
-
-**If no memory file or missing auth fields:**
-1. Run `node scripts/sealos-auth.mjs check`
-2. If `authenticated: true` → skip to Step 1b (init with `~/.sealos/kubeconfig`)
-3. If `authenticated: false` → proceed to Step 1a
+1. Run `node scripts/sealos-devbox.mjs list`
+2. If works → skip Step 1. Greet with context:
+   > Connected to Sealos. You have N devboxes.
+3. If fails (not authenticated, 401, connection error) → proceed to Step 1
 
 ---
 
 ## Step 1: Authenticate
 
-Run this step only if Step 0 found no valid memory.
+Run this step only if Step 0 failed.
 
 ### 1a. OAuth2 Login
 
-Run `node scripts/sealos-auth.mjs login`.
+Read `config.json` (in this skill's directory) for available regions and the default.
+Ask the user which region to connect to using `AskUserQuestion` with the regions as options.
+
+Run `node scripts/sealos-auth.mjs login {region_url}` (omit region_url for default).
 
 This command:
 1. Opens the user's browser to the Sealos authorization page
 2. Displays a user code and verification URL in stderr
 3. Polls until the user approves (max 10 minutes)
 4. Exchanges the token for a kubeconfig
-5. Saves to `~/.sealos/kubeconfig`
+5. Saves to `~/.sealos/kubeconfig` and `~/.sealos/auth.json` (with region)
 
 Display while waiting:
 > Opening browser for Sealos login... Approve the request in your browser.
@@ -99,38 +77,16 @@ Display while waiting:
 - question: "Browser login failed. Try again?"
 - options: ["Try again", "Cancel"]
 
-### 1b. Init (derive API URL + validate connection)
+### 1b. Verify connection
 
-Run `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig`. This single command:
-- Parses the kubeconfig, extracts the server URL
-- **Auto-probes** candidate API URLs (tries `devbox.<domain>` with subdomain
-  variations) and uses the first one that responds successfully
-- Saves config to `~/.config/sealos-devbox/config.json`
-- Fetches available templates and lists devboxes
+After login, run `node scripts/sealos-devbox.mjs list` to verify auth works.
 
-**If auto-detection fails** (error mentions "Could not auto-detect API URL"):
-`AskUserQuestion`:
-- header: "API URL"
-- question: "Could not auto-detect API URL. What is your Sealos domain?"
-- useDescription: "Find it in your browser URL bar when logged into Sealos Console (e.g., gzg.sealos.io)"
-- options: ["I'll check my Sealos Console"]
+**If auth error (401):** Token may have expired. Re-run `node scripts/sealos-auth.mjs login`.
 
-Then run: `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig https://devbox.<domain>`
+**If success:** Display:
+> Connected to Sealos. You have N devboxes.
 
-**If `init` returns an `authError`** (has `templates` but `devboxes: null`):
-The API URL is correct but the kubeconfig token has expired.
-
-1. Display:
-   > API connection successful, but your kubeconfig token has expired.
-2. Re-run `node scripts/sealos-auth.mjs login` to re-authenticate
-3. After login succeeds → re-run `node scripts/sealos-devbox.mjs init ~/.sealos/kubeconfig`
-4. Clear the memory file's `Auth` section so stale credentials aren't reused.
-
-**If `init` succeeds fully** (has `templates` and `devboxes`, no `authError`):
-The response includes `templates`, `devboxes`, and `profileName`. Display:
-> Connected to Sealos (`{profileName}`). You have N devboxes.
-
-Use `templates` and `devboxes` in Step 3 instead of making separate calls.
+Use the devboxes list in Step 3 instead of making a separate `list` call.
 
 ---
 
@@ -152,7 +108,6 @@ Determine the operation from user intent:
 | "monitor/metrics/CPU/memory usage" | Monitor |
 | "autostart/startup command" | Autostart |
 
-
 If ambiguous, ask one clarifying question.
 
 ---
@@ -161,17 +116,12 @@ If ambiguous, ask one clarifying question.
 
 ### Create
 
-**3a. Scan project context**
+**3a. Templates & existing devboxes**
 
-Check the working directory for project files (package.json, go.mod, requirements.txt,
-Cargo.toml, etc.) to understand the tech stack.
+Use devboxes from the `list` response (Step 0 or 1b). Run `node scripts/sealos-devbox.mjs templates`
+to get available runtimes.
 
-**3b. Templates & existing devboxes**
-
-Use templates and devboxes from `init` response (Step 1c). If Step 0 was used
-(skipped auth), run `node scripts/sealos-devbox.mjs templates` only if needed.
-
-**3c. Ask name first**
+**3b. Ask name first**
 
 `AskUserQuestion`:
 - header: "Name"
@@ -181,15 +131,14 @@ Use templates and devboxes from `init` response (Step 1c). If Step 0 was used
   If a name already exists (from list), avoid it and note the conflict.
 - Constraint: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, max 63 chars
 
-**3d. Show recommended config and confirm**
+**3c. Show recommended config and confirm**
 
 Read `references/defaults.md` for runtime recommendation rules and resource presets.
 
 Auto-resolve config from context:
 - User's request (e.g., "create a python devbox" → runtime is python)
-- Project tech stack from 3a (e.g., Next.js → recommend next.js runtime)
+- Project tech stack (e.g., Next.js → recommend next.js runtime)
 - Scale hints (e.g., "production devbox" → higher resources)
-- Memory preferences (e.g., last used runtime)
 - Default port from templates API (e.g., next.js → 3000)
 
 Display the **recommended config summary** (all fields from the create API):
@@ -208,10 +157,10 @@ Then `AskUserQuestion`:
 - header: "Config"
 - question: "Create with this config?"
 - options:
-  1. "Create now (Recommended)" — accept all, proceed to 3e
-  2. "Customize" — go to 3d-customize flow
+  1. "Create now (Recommended)" — accept all, proceed to 3d
+  2. "Customize" — go to 3c-customize flow
 
-**3d-customize: Pick fields to change, then configure only those**
+**3c-customize: Pick fields to change, then configure only those**
 
 `AskUserQuestion`:
 - header: "Customize"
@@ -270,7 +219,7 @@ After all fields, re-display the updated config summary and `AskUserQuestion`:
   1. "Create now (Recommended)"
   2. "Customize" — re-run the customize flow
 
-**3e. Create and wait**
+**3d. Create and wait**
 
 Build JSON body:
 ```json
@@ -280,7 +229,7 @@ Build JSON body:
 Run `node scripts/sealos-devbox.mjs create-wait '<json>'`. This single command creates the
 devbox and polls until `running` (timeout 2 minutes). The response includes SSH info.
 
-**3f. Show SSH info and offer integration**
+**3e. Show SSH info and offer integration**
 
 Display SSH connection details (host, port, username, key path).
 
@@ -546,62 +495,11 @@ or `node scripts/sealos-devbox.mjs autostart {name}` for default behavior.
 
 ---
 
-## Step 4: Update Memory
-
-After every successful operation, update the memory file named `sealos-devbox.md`
-in the project's auto memory directory.
-
-**What to save and when:**
-
-| Event | Save |
-|-------|------|
-| Successful auth (Step 1) | `kubeconfig_path`, `api_url`, `namespace` |
-| After create | Add devbox to list, update `preferred_runtime` |
-| After delete | Remove devbox from list |
-| After list/get | Refresh devboxes list with current state |
-
-**Memory file format:**
-
-```markdown
-# Sealos Devbox Memory
-
-## Auth
-- auth_method: oauth2
-- kubeconfig_path: ~/.sealos/kubeconfig
-- api_url: https://devbox.gzg.sealos.io/api/v2alpha
-- namespace: ns-xxx
-
-## Devboxes
-- my-app-next: next.js, running, 1C/2GB
-- api-server: go, stopped, 2C/4GB
-
-## Preferences
-- preferred_runtime: next.js
-```
-
-**Rules:**
-- Create the file if it doesn't exist
-- Use Edit tool to update specific sections, don't overwrite the whole file unnecessarily
-- The devboxes list is a cache for quick reference — always verify with live API when accuracy matters
-
----
-
 ## Scripts
 
 Two entry points in `scripts/` (relative to this skill's directory):
 - `sealos-auth.mjs` — OAuth2 Device Grant login (shared across all skills)
 - `sealos-devbox.mjs` — Devbox operations
-
-Zero external dependencies (Node.js only).
-TLS certificate verification is disabled (`rejectUnauthorized: false`) because Sealos
-clusters may use self-signed certificates. See `references/api-reference.md` for details.
-
-**The scripts are bundled with this skill — do NOT check if they exist. Just run them.**
-
-**Path resolution:** This skill's directory is listed in "Additional working directories"
-in the system environment. Use that path to locate the scripts. For example, if the
-additional working directory is `/Users/x/project/.claude/skills/sealos-devbox/scripts`,
-then run: `node /Users/x/project/.claude/skills/sealos-devbox/scripts/sealos-devbox.mjs <command>`.
 
 **Auth commands:**
 ```bash
@@ -611,46 +509,35 @@ node $SCRIPTS/sealos-auth.mjs login --insecure    # Skip TLS verification
 node $SCRIPTS/sealos-auth.mjs info                # Show auth details
 ```
 
-**Config auto-load priority:**
-1. `KUBECONFIG_PATH` + `API_URL` env vars (backwards compatible)
-2. `~/.config/sealos-devbox/config.json` (saved by `init`)
-3. Error with hint to run `init`
+Zero external dependencies (Node.js only). TLS verification is disabled for self-signed certs.
+
+**The scripts are bundled with this skill — do NOT check if they exist. Just run them.**
+
+**Path resolution:** Scripts are in this skill's `scripts/` directory. The full path is
+listed in the system environment's "Additional working directories" — use it directly.
+
+**Config resolution:** The script reads `~/.sealos/auth.json` (region) and `~/.sealos/kubeconfig`
+(credentials) — both created by `sealos-auth.mjs login`.
 
 ```bash
-# Use the absolute path from "Additional working directories" — examples below use SCRIPT as placeholder
-SCRIPT="/path/from/additional-working-dirs/sealos-devbox.mjs"
+# Examples use SCRIPT as placeholder — replace with <SKILL_DIR>/scripts/sealos-devbox.mjs
 
-# First-time setup — auto-probes API URL, saves config, returns templates + devboxes
-node $SCRIPT init ~/.sealos/kubeconfig
-
-# First-time setup with manual API URL (if auto-probe fails)
-node $SCRIPT init ~/.sealos/kubeconfig https://devbox.your-domain.com
-
-# After init, no env vars needed — config is auto-loaded
+# After login, everything just works — API URL derived from auth.json region
 node $SCRIPT templates
 node $SCRIPT list
 node $SCRIPT get my-devbox
-node $SCRIPT create '{"name":"my-devbox","runtime":"node.js","quota":{"cpu":1,"memory":2},"ports":[{"number":3000}]}'
-node $SCRIPT create-wait '{"name":"my-devbox","runtime":"node.js","quota":{"cpu":1,"memory":2}}'
+node $SCRIPT create-wait '{"name":"my-devbox","runtime":"node.js","quota":{"cpu":1,"memory":2},"ports":[{"number":3000}]}'
 node $SCRIPT update my-devbox '{"quota":{"cpu":2,"memory":4}}'
 node $SCRIPT update my-devbox '{"ports":[{"portName":"existing-port","isPublic":false},{"number":8080}]}'
 node $SCRIPT delete my-devbox
 node $SCRIPT start|pause|shutdown|restart my-devbox
 node $SCRIPT autostart my-devbox '{"execCommand":"npm start"}'
-
-# Release management
 node $SCRIPT list-releases my-devbox
 node $SCRIPT create-release my-devbox '{"tag":"v1.0.0","releaseDescription":"First release"}'
 node $SCRIPT delete-release my-devbox v1.0.0
-
-# Deployment
 node $SCRIPT deploy my-devbox v1.0.0
 node $SCRIPT list-deployments my-devbox
-
-# Monitoring
-node $SCRIPT monitor my-devbox
-node $SCRIPT monitor my-devbox 1760510280 1760513880 5m
-
+node $SCRIPT monitor my-devbox [start] [end] [step]
 ```
 
 ## Reference Files
@@ -666,7 +553,7 @@ node $SCRIPT monitor my-devbox 1760510280 1760513880 5m
 | Scenario | Action |
 |----------|--------|
 | Kubeconfig not found | Run `node scripts/sealos-auth.mjs login` to authenticate |
-| Auth error (401) | Run `node scripts/sealos-auth.mjs login` to re-authenticate, then re-run `init` |
+| Auth error (401) | Kubeconfig expired. Run `node scripts/sealos-auth.mjs login` to re-authenticate. |
 | Name conflict (409) | Suggest alternative name |
 | Invalid specs | Explain constraint, suggest valid value |
 | Creation timeout (>2 min) | Offer to keep polling or check console |
@@ -677,7 +564,7 @@ node $SCRIPT monitor my-devbox 1760510280 1760513880 5m
 
 - NEVER ask a question as plain text — ALWAYS use `AskUserQuestion` with options
 - NEVER ask user to manually download kubeconfig — always use `scripts/sealos-auth.mjs login`
-- NEVER run `test -f` on the skill script — it is always present, just run it
+- NEVER run `test -f` or `ls` on the skill scripts — they are always present, just run them
 - NEVER write kubeconfig to `~/.kube/config` — may overwrite user's existing config
 - NEVER echo kubeconfig content to output
 - NEVER delete without explicit name confirmation
