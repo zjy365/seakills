@@ -1,6 +1,6 @@
 ---
 name: docker-to-sealos
-description: "Convert Docker Compose files or installation docs into production-grade Sealos templates. Use when user says \"/docker-to-sealos\" or wants to convert a compose file to Sealos format."
+description: Convert Docker Compose files or installation docs into production-grade Sealos templates. Use when user has a docker-compose.yml and wants a Sealos or Kubernetes template, wants to migrate from Docker Compose to Sealos, needs to convert container orchestration configs to Sealos format, or mentions compose-to-template conversion. Also triggers on "/docker-to-sealos".
 ---
 
 # Docker to Sealos Template Converter
