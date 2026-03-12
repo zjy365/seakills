@@ -34,3 +34,4 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}-site:latest
             ghcr.io/${{ github.repository }}-site:v${{ env.VERSION }}
+            ghcr.io/${{ github.repository }}-site:sha-${{ github.sha }}

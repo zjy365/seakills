@@ -72,7 +72,7 @@ export function CtaSection() {
             <span className="text-border">|</span>
             <span>MIT License</span>
             <span className="text-border">|</span>
-            <span>v1.0.5</span>
+            <span>v1.1.0</span>
           </div>
         </div>
       </motion.div>

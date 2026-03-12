@@ -15,8 +15,13 @@ const features = [
   },
   {
     title: "Sealos Cloud",
-    desc: "Your deployment target. Provide a token on first use — the skill guides you through OAuth setup.",
+    desc: "Your deployment target. Automatic OAuth device-flow login — just open a link and confirm.",
     tag: "Required",
+  },
+  {
+    title: "kubectl",
+    desc: "Enables in-place updates for deployed apps. Without it, each deploy creates a fresh instance.",
+    tag: "Optional",
   },
 ]
 
@@ -52,7 +57,7 @@ export function SetupSection() {
           On first use, the skill checks your environment and guides you through setup interactively.
         </motion.p>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {features.map((f, i) => (
             <motion.div
               key={i}

@@ -115,8 +115,11 @@ function detectSignals(repoDir) {
     http.has_http_handler = fw.express || fw.hono || fw.fastify || fw.nestjs || fw.nextjs || fw.nuxt;
   }
   if (lang.go) {
-    http.has_port_listen = true; // Go web apps always listen on port
-    http.has_http_handler = true;
+    const hasGoWebFw = fw.gin || fw.echo || fw.fiber ||
+      grepFile('go.mod', /go-chi\/chi|gorilla\/mux/);
+    const hasGoHttpCode = grepDir('', /http\.ListenAndServe|ListenAndServeTLS/, ['.go']);
+    http.has_http_handler = !!(hasGoWebFw || hasGoHttpCode);
+    http.has_port_listen = http.has_http_handler;
   }
   if (lang.python) {
     http.has_port_listen = fw.fastapi || fw.django || fw.flask;
@@ -188,8 +191,11 @@ function detectSignals(repoDir) {
 
   // ── Docker Artifacts ──
   const docker = {};
-  docker.has_dockerfile = hasAny('Dockerfile', 'dockerfile');
-  docker.has_compose = hasAny('docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml');
+  const _dockerfilePaths = findFiles(repoDir, /^(Dockerfile|dockerfile)(\.[\w.-]+)?$/, 3);
+  const _composePaths = findFiles(repoDir, /^(docker-compose|compose)\.(yml|yaml)$/, 3);
+  docker.has_dockerfile = _dockerfilePaths.length > 0;
+  docker.has_compose = _composePaths.length > 0;
+  docker._dockerfile_paths = _dockerfilePaths.map(f => path.relative(repoDir, f));
   docker.has_dockerignore = has('.dockerignore');
   docker.has_k8s = hasAny('k8s', 'kubernetes', 'helm', 'charts', 'Chart.yaml', 'kustomization.yaml');
   docker.has_any = docker.has_dockerfile || docker.has_compose;
@@ -208,8 +214,19 @@ function detectSignals(repoDir) {
     lifecycle.has_build = 'build' in scripts;
     lifecycle.has_dev = 'dev' in scripts;
   }
-  lifecycle.has_health_check = docker.has_dockerfile &&
-    grepFile('Dockerfile', /HEALTHCHECK/);
+  lifecycle.has_health_check = _dockerfilePaths.some(f => {
+    try { return /HEALTHCHECK/.test(fs.readFileSync(f, 'utf-8')); } catch { return false; }
+  });
+  if (lang.java) {
+    lifecycle.has_build = hasAny('pom.xml', 'gradlew', 'mvnw', 'build.gradle', 'build.gradle.kts');
+    lifecycle.has_start = !!fw.spring;
+    if (!lifecycle.has_health_check) {
+      lifecycle.has_health_check =
+        grepFile('pom.xml', /spring-boot-starter-actuator/) ||
+        grepFile('build.gradle', /spring-boot-starter-actuator/) ||
+        grepFile('build.gradle.kts', /spring-boot-starter-actuator/);
+    }
+  }
 
   return { lang, fw, http, state, config, docker, mono, lifecycle };
 }
@@ -260,7 +277,7 @@ function scoreProject(repoDir) {
   }
 
   // ── Dimension 3: Horizontal Scalability (0-2) ──
-  if (s.lang.go || s.lang.rust) {
+  if ((s.lang.go || s.lang.rust) && s.http.has_http_handler) {
     scores.scalability = 2;
     details.scalability = 'Compiled binary — inherently scalable';
   } else if (s.http.has_http_handler && s.state.uses_redis) {
@@ -275,7 +292,7 @@ function scoreProject(repoDir) {
   }
 
   // ── Dimension 4: Startup/Shutdown (0-2) ──
-  if (s.lang.go || s.lang.rust) {
+  if ((s.lang.go || s.lang.rust) && s.http.has_http_handler) {
     scores.startup = 2;
     details.startup = 'Compiled binary — fast startup + graceful shutdown';
   } else if (s.fw.hono || s.fw.fastify) {
@@ -361,6 +378,7 @@ function scoreProject(repoDir) {
       has_docker: s.docker.has_any,
       is_monorepo: s.mono.is_monorepo,
       has_env_example: s.config.has_env_example,
+      dockerfile_paths: s.docker._dockerfile_paths || [],
     },
   };
 }
